@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -616,12 +617,21 @@ func (s *Server) addBlocklist(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Persist to database
+	lists := s.filter.GetLists()
+	for _, l := range lists {
+		if l.Name == req.Name {
+			s.db.SaveBlocklistWithCategory(l.Name, req.URL, string(l.Category), l.Count)
+			break
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (s *Server) removeBlocklist(c *gin.Context) {
 	name := c.Param("name")
 	s.filter.RemoveList(name)
+	s.db.RemoveBlocklist(name)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -648,13 +658,22 @@ func (s *Server) addCustomBlock(c *gin.Context) {
 		return
 	}
 	s.filter.AddCustomBlock(req.Domain, req.Reason)
+	s.persistCustomBlocks()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (s *Server) removeCustomBlock(c *gin.Context) {
 	domain := c.Param("domain")
 	s.filter.RemoveCustomBlock(domain)
+	s.persistCustomBlocks()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) persistCustomBlocks() {
+	blocks := s.filter.GetCustomBlocks()
+	if data, err := json.Marshal(blocks); err == nil {
+		s.db.SetSetting("custom_blocks", string(data))
+	}
 }
 
 func (s *Server) getAllowlist(c *gin.Context) {
@@ -673,13 +692,22 @@ func (s *Server) addAllowlist(c *gin.Context) {
 		return
 	}
 	s.filter.AddAllowlistDomain(req.Domain)
+	s.persistAllowlist()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (s *Server) removeAllowlist(c *gin.Context) {
 	domain := c.Param("domain")
 	s.filter.RemoveAllowlistDomain(domain)
+	s.persistAllowlist()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) persistAllowlist() {
+	list := s.filter.GetAllowlist()
+	if data, err := json.Marshal(list); err == nil {
+		s.db.SetSetting("allowlist", string(data))
+	}
 }
 
 func (s *Server) getStatus(c *gin.Context) {

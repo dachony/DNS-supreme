@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,8 @@ func (s *Server) setNetProtectCategory(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Persist enabled categories
+	s.saveNpCategories()
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "id": id, "enabled": req.Enabled})
 }
 
@@ -59,7 +62,23 @@ func (s *Server) setNetProtectGeo(c *gin.Context) {
 		return
 	}
 	s.netProtect.SetGeoBlocked(req.Countries)
+	if data, err := json.Marshal(req.Countries); err == nil {
+		s.db.SetSetting("geo_blocked_countries", string(data))
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "blocked_countries": len(req.Countries)})
+}
+
+func (s *Server) saveNpCategories() {
+	cats := s.netProtect.GetCategories()
+	enabled := make([]string, 0)
+	for _, c := range cats {
+		if c.Enabled {
+			enabled = append(enabled, c.ID)
+		}
+	}
+	if data, err := json.Marshal(enabled); err == nil {
+		s.db.SetSetting("np_enabled_categories", string(data))
+	}
 }
 
 func (s *Server) refreshNetProtect(c *gin.Context) {

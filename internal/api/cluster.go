@@ -43,8 +43,10 @@ type peerInfo struct {
 // --- Hostname ---
 
 func (s *Server) getHostname(c *gin.Context) {
-	settingsMu.RLock()
-	defer settingsMu.RUnlock()
+	if v := s.db.GetSetting("hostname"); v != "" {
+		c.JSON(http.StatusOK, gin.H{"hostname": v})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"hostname": hostnameStore})
 }
 
@@ -61,14 +63,17 @@ func (s *Server) setHostname(c *gin.Context) {
 	settingsMu.Lock()
 	hostnameStore = req.Hostname
 	settingsMu.Unlock()
+	s.db.SetSetting("hostname", req.Hostname)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 // --- Primary Domain ---
 
 func (s *Server) getPrimaryDomain(c *gin.Context) {
-	settingsMu.RLock()
-	defer settingsMu.RUnlock()
+	if v := s.db.GetSetting("primary_domain"); v != "" {
+		c.JSON(http.StatusOK, gin.H{"domain": v})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"domain": primaryDomainStore})
 }
 
@@ -86,6 +91,7 @@ func (s *Server) setPrimaryDomain(c *gin.Context) {
 	settingsMu.Lock()
 	primaryDomainStore = req.Domain
 	settingsMu.Unlock()
+	s.db.SetSetting("primary_domain", req.Domain)
 
 	// Auto-create zone if it doesn't exist
 	s.ensurePrimaryZone(req.Domain)
