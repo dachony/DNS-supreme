@@ -361,18 +361,61 @@
 
     <!-- TAB: Block Page -->
     <div v-if="activeTab === 'blockpage'" class="tab-content">
-      <p class="section-desc">
-        Customize the page shown when a user visits a blocked domain.
-        Use <code v-pre>{{.Domain}}</code> for the blocked domain and <code v-pre>{{.Reason}}</code> for the block reason.
-      </p>
-      <textarea v-model="blockPageHTML" class="code-editor" rows="14"
-        placeholder="Leave empty to use the default block page template..."></textarea>
-      <div class="section-actions">
-        <button @click="saveBlockPage" class="btn-primary">Save Template</button>
-        <button @click="previewBlockPage" class="btn-secondary">Preview</button>
-        <button @click="blockPageHTML = ''; saveBlockPage()" class="btn-text">Reset to Default</button>
+      <div class="bp-split">
+        <!-- Left: Builder -->
+        <div class="bp-builder">
+          <div class="bp-mode-switch">
+            <button :class="{ active: bpMode === 'visual' }" @click="bpMode = 'visual'" class="bp-mode-btn">Visual Builder</button>
+            <button :class="{ active: bpMode === 'html' }" @click="bpMode = 'html'" class="bp-mode-btn">Custom HTML</button>
+          </div>
+
+          <div v-if="bpMode === 'visual'" class="bp-visual">
+            <div class="field">
+              <label>Logo URL (optional)</label>
+              <input v-model="bpLogo" placeholder="https://example.com/logo.png or leave empty" @input="updateBpFromVisual" />
+            </div>
+            <div class="field">
+              <label>Heading</label>
+              <input v-model="bpHeading" placeholder="Access Blocked" @input="updateBpFromVisual" />
+            </div>
+            <div class="field">
+              <label>Message</label>
+              <textarea v-model="bpMessage" rows="3" placeholder="Access to this page has been blocked by your network administrator." @input="updateBpFromVisual"></textarea>
+            </div>
+            <div class="field">
+              <label>Footer (optional)</label>
+              <input v-model="bpFooter" placeholder="Protected by DNS Supreme" @input="updateBpFromVisual" />
+            </div>
+            <div class="field">
+              <label>Accent Color</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="color" v-model="bpColor" @input="updateBpFromVisual" style="width:36px;height:30px;border:none;cursor:pointer" />
+                <span style="color:var(--text-muted);font-size:0.8rem">{{ bpColor }}</span>
+              </div>
+            </div>
+            <p class="section-desc" style="font-size:0.75rem">Variables: <code v-pre>{{.Domain}}</code> = blocked domain, <code v-pre>{{.Reason}}</code> = block reason</p>
+          </div>
+
+          <div v-if="bpMode === 'html'" class="bp-html-mode">
+            <p class="section-desc">Paste full HTML. Use <code v-pre>{{.Domain}}</code> and <code v-pre>{{.Reason}}</code> as variables.</p>
+            <textarea v-model="blockPageHTML" class="code-editor" rows="18" placeholder="Paste custom HTML here..."></textarea>
+          </div>
+
+          <div class="section-actions" style="margin-top:12px">
+            <button @click="saveBlockPage" class="btn-primary">Save</button>
+            <button @click="resetBlockPage" class="btn-text">Reset to Default</button>
+          </div>
+          <div v-if="bpMsg" class="msg-success">{{ bpMsg }}</div>
+        </div>
+
+        <!-- Right: Live Preview -->
+        <div class="bp-preview-wrap">
+          <h4>Preview</h4>
+          <div class="bp-preview-frame">
+            <iframe :srcdoc="bpPreviewHTML" class="bp-iframe"></iframe>
+          </div>
+        </div>
       </div>
-      <div v-if="bpMsg" class="msg-success">{{ bpMsg }}</div>
     </div>
 
     <!-- TAB: Log Management -->
@@ -628,7 +671,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject, onMounted } from 'vue'
+import { ref, computed, inject, onMounted } from 'vue'
 import axios from 'axios'
 import { currentUser } from '../auth'
 
@@ -1033,6 +1076,61 @@ async function generateZoneCert(zoneName: string) {
 
 const blockPageHTML = ref('')
 const bpMsg = ref('')
+const bpMode = ref('visual')
+const bpLogo = ref('')
+const bpHeading = ref('Access Blocked')
+const bpMessage = ref('Access to this page has been blocked by your network administrator.')
+const bpFooter = ref('Protected by DNS Supreme')
+const bpColor = ref('#ef4444')
+
+const bpPreviewHTML = computed(() => {
+  const html = blockPageHTML.value || generateVisualHTML()
+  return html.replace(/\{\{\.Domain\}\}/g, 'example-blocked.com').replace(/\{\{\.Reason\}\}/g, '[ads] stevenblack-hosts')
+})
+
+function generateVisualHTML(): string {
+  const logo = bpLogo.value ? `<img src="${bpLogo.value}" alt="Logo" style="max-height:48px;margin-bottom:16px">` : ''
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blocked</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#e2e8f0}
+.card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:48px;max-width:480px;width:90%;text-align:center;box-shadow:0 16px 48px rgba(0,0,0,0.3)}
+.logo{margin-bottom:16px}
+.icon{font-size:48px;margin-bottom:16px;color:${bpColor.value}}
+h1{font-size:1.5rem;color:#f1f5f9;margin-bottom:12px}
+.message{color:#94a3b8;font-size:0.95rem;line-height:1.6;margin-bottom:20px}
+.domain{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 16px;font-family:monospace;font-size:0.9rem;color:${bpColor.value};margin-bottom:8px;word-break:break-all}
+.reason{color:#64748b;font-size:0.8rem;margin-bottom:20px}
+.footer{color:#475569;font-size:0.75rem;padding-top:16px;border-top:1px solid #334155}
+</style></head><body>
+<div class="card">
+  <div class="logo">${logo}</div>
+  <div class="icon">&#x26D4;</div>
+  <h1>${bpHeading.value || 'Access Blocked'}</h1>
+  <p class="message">${bpMessage.value || ''}</p>
+  <div class="domain">{{.Domain}}</div>
+  <p class="reason">Reason: {{.Reason}}</p>
+  ${bpFooter.value ? `<div class="footer">${bpFooter.value}</div>` : ''}
+</div>
+</body></html>`
+}
+
+function updateBpFromVisual() {
+  blockPageHTML.value = generateVisualHTML()
+}
+
+function resetBlockPage() {
+  bpLogo.value = ''
+  bpHeading.value = 'Access Blocked'
+  bpMessage.value = 'Access to this page has been blocked by your network administrator.'
+  bpFooter.value = 'Protected by DNS Supreme'
+  bpColor.value = '#ef4444'
+  blockPageHTML.value = ''
+  bpMode.value = 'visual'
+  saveBlockPage()
+}
 
 const logRetention = ref({ days: 30, autoCleanup: true })
 const logStats = ref<any>(null)
@@ -1241,20 +1339,10 @@ function formatDate(d: string) {
 // --- Block Page ---
 async function saveBlockPage() {
   bpMsg.value = ''
-  const html = blockPageHTML.value || '<h1>Blocked</h1>'
+  const html = blockPageHTML.value || generateVisualHTML()
   await axios.put('/api/settings/blockpage', { html })
-  if (!blockPageHTML.value) blockPageHTML.value = ''
-  bpMsg.value = 'Template saved'
+  bpMsg.value = 'Block page saved'
   setTimeout(() => bpMsg.value = '', 3000)
-}
-
-function previewBlockPage() {
-  const w = window.open('', '_blank', 'width=600,height=500')
-  if (!w) return
-  let html = blockPageHTML.value || '<h1>Blocked</h1>'
-  html = html.replace(/\{\{\.Domain\}\}/g, 'example-blocked.com')
-  html = html.replace(/\{\{\.Reason\}\}/g, '[ads] stevenblack-hosts')
-  w.document.write(html)
 }
 
 onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings(); loadAcmeConfig() })
@@ -1447,6 +1535,30 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 .cert-zone-status { font-size: 0.78rem; }
 .cert-zone-status.has { color: #22c55e; }
 .cert-zone-status.none { color: var(--text-dim); }
+/* Block page builder */
+.bp-split { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.bp-builder { min-width: 0; }
+.bp-mode-switch { display: flex; gap: 2px; margin-bottom: 16px; background: var(--bg-input); border-radius: 8px; padding: 3px; }
+.bp-mode-btn {
+  flex: 1; padding: 7px 12px; background: transparent; border: none;
+  color: var(--text-secondary); border-radius: 6px; cursor: pointer;
+  font-size: 0.84rem; transition: all 0.15s;
+}
+.bp-mode-btn.active { background: var(--accent); color: #fff; }
+.bp-visual .field { margin-bottom: 12px; }
+.bp-visual textarea { width: 100%; padding: 9px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; resize: vertical; }
+.bp-html-mode .code-editor { width: 100%; }
+
+.bp-preview-wrap { position: sticky; top: 20px; }
+.bp-preview-wrap h4 { color: var(--text-primary); font-size: 0.9rem; margin-bottom: 8px; }
+.bp-preview-frame {
+  background: #0f172a; border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; aspect-ratio: 4/3;
+}
+.bp-iframe {
+  width: 100%; height: 100%; border: none; background: #0f172a;
+}
+
 .cert-zone-actions { display: flex; gap: 6px; }
 
 /* Cert export */
