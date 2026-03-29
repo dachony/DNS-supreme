@@ -1,0 +1,7 @@
+node_modules/
+dist/
+web/frontend/dist/
+dns-supreme
+.env
+*.log
+pgdata/

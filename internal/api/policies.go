@@ -1,0 +1,56 @@
+package api
+
+import (
+	"net/http"
+
+	"github.com/dachony/dns-supreme/internal/filter"
+	"github.com/gin-gonic/gin"
+)
+
+func (s *Server) setupPolicyRoutes(protected *gin.RouterGroup) {
+	pol := protected.Group("/policies")
+	{
+		pol.GET("", s.listPolicies)
+		pol.POST("", s.createPolicy)
+		pol.GET("/:ip", s.getPolicy)
+		pol.DELETE("/:ip", s.deletePolicy)
+	}
+}
+
+func (s *Server) listPolicies(c *gin.Context) {
+	if s.policies == nil {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+	c.JSON(http.StatusOK, s.policies.ListPolicies())
+}
+
+func (s *Server) createPolicy(c *gin.Context) {
+	var p filter.DevicePolicy
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if p.ClientIP == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "client_ip required"})
+		return
+	}
+	s.policies.SetPolicy(&p)
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) getPolicy(c *gin.Context) {
+	ip := c.Param("ip")
+	p := s.policies.GetPolicy(ip)
+	if p == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no policy for this IP"})
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}
+
+func (s *Server) deletePolicy(c *gin.Context) {
+	ip := c.Param("ip")
+	s.policies.RemovePolicy(ip)
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
