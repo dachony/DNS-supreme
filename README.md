@@ -15,7 +15,7 @@ Open **http://localhost:5380** and login with `admin` / `admin`.
 ## Requirements
 
 - Docker and Docker Compose
-- Ports: 5380 (web UI), 53535 (DNS — configurable)
+- Ports: 53 (DNS), 853 (DoT), 443 (DoH), 80 (block page), 5380 (web UI), 53443 (HTTPS)
 
 ## What's Included
 
@@ -72,17 +72,17 @@ Open **http://localhost:5380** and login with `admin` / `admin`.
 - SMTP mail with notifications
 - Full settings persistence (survives restarts)
 
-## Docker Compose Ports
+## Ports
 
-| Port | Service |
-|------|---------|
-| 5380 | Web UI and API |
-| 53535 | DNS (UDP+TCP) |
-| 8530 | DNS-over-TLS |
-| 8553 | DNS-over-HTTPS |
-| 8853 | DNS-over-QUIC |
-| 8880 | Block page HTTP |
-| 4443 | Block page HTTPS |
+| Port | Protocol | Service |
+|------|----------|---------|
+| 53 | UDP+TCP | DNS (standard) |
+| 853 | TCP | DNS-over-TLS |
+| 443 | TCP | DNS-over-HTTPS |
+| 8853 | UDP | DNS-over-QUIC |
+| 80 | TCP | Block page HTTP |
+| 5380 | TCP | Management panel (Web UI + API) |
+| 53443 | TCP | Management panel HTTPS / Block page HTTPS |
 
 ## Configuration
 

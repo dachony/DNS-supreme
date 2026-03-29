@@ -3,14 +3,14 @@ services:
     build: .
     container_name: dns-supreme
     ports:
-      - "53535:53/udp"        # DNS UDP
-      - "53535:53/tcp"        # DNS TCP
-      - "8530:853/tcp"        # DoT
-      - "8553:8443/tcp"       # DoH
-      - "8853:8853/udp"       # DoQ
-      - "8880:80"             # Block page HTTP  (prod: 80:80)
-      - "4443:443"            # Block page HTTPS (prod: 443:443)
-      - "5380:5380"           # Management panel
+      - "53:53/udp"             # DNS UDP
+      - "53:53/tcp"             # DNS TCP
+      - "853:853/tcp"           # DNS-over-TLS
+      - "443:8443/tcp"          # DNS-over-HTTPS
+      - "8853:8853/udp"         # DNS-over-QUIC
+      - "80:80"                 # Block page HTTP
+      - "5380:5380"             # Management panel HTTP
+      - "53443:443"             # Management panel / Block page HTTPS
     environment:
       - DNS_LISTEN_ADDR=0.0.0.0
       - DNS_PORT=53
