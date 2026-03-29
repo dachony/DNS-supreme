@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -159,5 +160,16 @@ func (s *Server) setCluster(c *gin.Context) {
 	settingsMu.Lock()
 	clusterStore = req
 	settingsMu.Unlock()
+	if data, err := json.Marshal(req); err == nil {
+		s.db.SetSetting("cluster_config", string(data))
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Cluster settings saved. Restart to apply."})
+}
+
+func (s *Server) getClusterFromDB() {
+	if data := s.db.GetSetting("cluster_config"); data != "" {
+		settingsMu.Lock()
+		json.Unmarshal([]byte(data), &clusterStore)
+		settingsMu.Unlock()
+	}
 }

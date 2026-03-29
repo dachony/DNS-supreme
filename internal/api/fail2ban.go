@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"sync"
@@ -241,6 +242,9 @@ func (s *Server) setFail2BanSettings(c *gin.Context) {
 		return
 	}
 	s.fail2ban.SetSettings(req.Enabled, req.MaxRetries, req.BanSeconds)
+	if data, err := json.Marshal(s.fail2ban.GetSettings()); err == nil {
+		s.db.SetSetting("fail2ban_settings", string(data))
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -261,5 +265,27 @@ func (s *Server) setAllowedIPs(c *gin.Context) {
 		return
 	}
 	s.fail2ban.SetAllowedIPs(req.IPs)
+	if data, err := json.Marshal(req.IPs); err == nil {
+		s.db.SetSetting("allowed_ips", string(data))
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "count": len(req.IPs)})
+}
+
+// LoadFail2BanConfig restores fail2ban settings from database
+func (s *Server) LoadFail2BanConfig() {
+	if data := s.db.GetSetting("fail2ban_settings"); data != "" {
+		var settings map[string]any
+		if json.Unmarshal([]byte(data), &settings) == nil {
+			enabled, _ := settings["enabled"].(bool)
+			maxRetries := int(settings["max_retries"].(float64))
+			banSeconds := int(settings["ban_seconds"].(float64))
+			s.fail2ban.SetSettings(enabled, maxRetries, banSeconds)
+		}
+	}
+	if data := s.db.GetSetting("allowed_ips"); data != "" {
+		var ips []string
+		if json.Unmarshal([]byte(data), &ips) == nil {
+			s.fail2ban.SetAllowedIPs(ips)
+		}
+	}
 }

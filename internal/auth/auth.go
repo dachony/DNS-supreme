@@ -68,6 +68,14 @@ func VerifyTOTP(secret, code string) bool {
 	return false
 }
 
+// GenerateEmailCode creates a random 6-digit code for email MFA
+func GenerateEmailCode() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	code := int(binary.BigEndian.Uint32(b)) % 1000000
+	return fmt.Sprintf("%06d", code)
+}
+
 func TOTPProvisioningURI(secret, username, issuer string) string {
 	return fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=30",
 		issuer, username, secret, issuer)

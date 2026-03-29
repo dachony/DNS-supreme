@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/dachony/dns-supreme/internal/auth"
 	"github.com/dachony/dns-supreme/internal/blockpage"
@@ -27,9 +28,10 @@ type Server struct {
 	policies   *filter.PolicyManager
 	dns        *dnsserver.Server
 	dnssec     *dnsserver.DNSSECManager
-	fail2ban   *Fail2Ban
-	mailer     *mailer.Mailer
-	router     *gin.Engine
+	fail2ban      *Fail2Ban
+	mailer        *mailer.Mailer
+	emailMFACodes map[int]emailMFAEntry // userID -> code+expiry
+	router        *gin.Engine
 }
 
 func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter.Engine, netProtect *filter.NetProtectEngine, bp *blockpage.Server, dnsServer *dnsserver.Server) *Server {
@@ -46,14 +48,17 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 		blockPage:  bp,
 		policies:   filter.NewPolicyManager(),
 		dns:        dnsServer,
-		fail2ban:   NewFail2Ban(),
-		mailer:     mailer.New(),
+		fail2ban:      NewFail2Ban(),
+		mailer:        mailer.New(),
+		emailMFACodes: make(map[int]emailMFAEntry),
 		dnssec:     dnsserver.NewDNSSECManager(),
 		router:     router,
 	}
 
 	s.ensureDefaultAdmin()
 	s.LoadMailConfig()
+	s.LoadFail2BanConfig()
+	s.getClusterFromDB()
 	s.setupRoutes()
 	return s
 }
@@ -197,6 +202,27 @@ func (s *Server) setupRoutes() {
 	}
 }
 
+type emailMFAEntry struct {
+	Code      string
+	ExpiresAt time.Time
+}
+
+func (s *Server) storeEmailMFACode(userID int, code string) {
+	s.emailMFACodes[userID] = emailMFAEntry{
+		Code:      code,
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+}
+
+func (s *Server) verifyEmailMFACode(userID int, code string) bool {
+	entry, ok := s.emailMFACodes[userID]
+	if !ok {
+		return false
+	}
+	delete(s.emailMFACodes, userID)
+	return entry.Code == code && time.Now().Before(entry.ExpiresAt)
+}
+
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.Port)
 	log.Printf("[API] Web UI and API available at http://%s", addr)
@@ -269,6 +295,12 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	if !mfaDone {
+		// If email MFA, send the code now
+		if user.MFAType == "email" && user.Email != "" && s.mailer.IsConfigured() {
+			code := auth.GenerateEmailCode()
+			s.storeEmailMFACode(user.ID, code)
+			go s.mailer.SendMFACode(user.Email, code)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"token":        token,
 			"mfa_required": true,
@@ -325,7 +357,14 @@ func (s *Server) mfaVerify(c *gin.Context) {
 		return
 	}
 
-	if !auth.VerifyTOTP(user.MFASecret, req.Code) {
+	// Verify based on MFA type
+	verified := false
+	if user.MFAType == "email" {
+		verified = s.verifyEmailMFACode(user.ID, req.Code)
+	} else {
+		verified = auth.VerifyTOTP(user.MFASecret, req.Code)
+	}
+	if !verified {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid MFA code"})
 		return
 	}
