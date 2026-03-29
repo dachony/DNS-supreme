@@ -633,6 +633,7 @@ import axios from 'axios'
 import { currentUser } from '../auth'
 
 const confirm = inject('confirm') as (opts: any) => Promise<boolean>
+const requestRestart = inject('requestRestart') as () => void
 
 // --- Tabs ---
 const activeTab = ref('identity')
@@ -1007,7 +1008,7 @@ async function requestAcmeCert() {
     const domain = primaryDomain.value || 'dnssupreme.local'
     await axios.post('/api/acme/request', { domain })
     acmeMsg.value = `Certificate request started for ${domain}. This may take a minute.`
-    setTimeout(() => acmeMsg.value = '', 10000)
+    setTimeout(() => { acmeMsg.value = ''; requestRestart() }, 10000)
   } catch (e: any) { acmeMsg.value = 'Failed: ' + (e.response?.data?.error || e.message) }
 }
 const certZones = ref<any[]>([])
@@ -1199,6 +1200,7 @@ async function generateCert() {
   const { data } = await axios.post('/api/certs/generate')
   certMsg.value = data.message
   loadAll()
+  requestRestart()
 }
 
 async function handleCertUpload(e: Event) {
@@ -1226,6 +1228,7 @@ async function submitCertUpload() {
     certUploadShow.value = false
     certUploadKeyText.value = ''
     loadAll()
+    requestRestart()
   } catch (err: any) {
     certMsg.value = 'Upload failed: ' + (err.response?.data?.error || err.message)
   }

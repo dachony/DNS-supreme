@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/dachony/dns-supreme/internal/auth"
@@ -97,7 +99,7 @@ func (s *Server) setupRoutes() {
 
 	api := s.router.Group("/api")
 
-	// Health check (no auth required)
+	// Health check and restart (no auth on health)
 	api.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "healthy",
@@ -149,6 +151,9 @@ func (s *Server) setupRoutes() {
 		protected.PUT("/fail2ban/settings", s.setFail2BanSettings)
 		protected.DELETE("/fail2ban/unban/:ip", s.unbanIP)
 		protected.PUT("/fail2ban/allowed-ips", s.setAllowedIPs)
+
+		// Server restart
+		protected.POST("/restart", s.restartServer)
 
 		// Mail
 		protected.GET("/mail/settings", s.getMailSettings)
@@ -239,6 +244,21 @@ func (s *Server) verifyEmailMFACode(userID int, code string) bool {
 	}
 	delete(s.emailMFACodes, userID)
 	return entry.Code == code && time.Now().Before(entry.ExpiresAt)
+}
+
+func (s *Server) restartServer(c *gin.Context) {
+	log.Println("[API] Server restart requested via API")
+	c.JSON(http.StatusOK, gin.H{"status": "restarting"})
+
+	// Graceful restart: signal the process to restart
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		// Send SIGHUP to self for graceful restart
+		p, err := os.FindProcess(os.Getpid())
+		if err == nil {
+			p.Signal(syscall.SIGHUP)
+		}
+	}()
 }
 
 func (s *Server) Start() error {

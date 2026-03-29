@@ -171,8 +171,22 @@ func main() {
 	log.Println("DNS-supreme is ready!")
 
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
+	for s := range sig {
+		if s == syscall.SIGHUP {
+			log.Println("[Restart] SIGHUP received — reloading TLS and restarting DNS...")
+			// Reload TLS certificates
+			newTLS, err := certs.LoadOrGenerateTLS(certFile, keyFile)
+			if err == nil && newTLS != nil {
+				dnsServer.ReloadTLS(newTLS)
+				log.Println("[Restart] TLS certificates reloaded")
+			}
+			log.Println("[Restart] Restart complete")
+			continue
+		}
+		break // SIGINT or SIGTERM
+	}
 
 	log.Println("Shutting down...")
 }

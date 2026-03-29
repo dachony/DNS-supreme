@@ -41,6 +41,13 @@
       </div>
     </nav>
     <main class="content">
+      <div v-if="needsRestart" class="restart-banner">
+        <span>Configuration changed — restart required to apply.</span>
+        <button @click="restartServer" :disabled="restarting" class="restart-banner-btn">
+          {{ restarting ? 'Restarting...' : 'Restart Now' }}
+        </button>
+        <button @click="needsRestart = false" class="restart-banner-dismiss">&times;</button>
+      </div>
       <router-view />
     </main>
   </div>
@@ -69,6 +76,19 @@ import { isAuthenticated, currentUser, logout } from './auth'
 
 const router = useRouter()
 const status = ref<any>(null)
+const needsRestart = ref(false)
+const restarting = ref(false)
+
+async function restartServer() {
+  restarting.value = true
+  try {
+    await axios.post('/api/restart')
+    setTimeout(() => { restarting.value = false; needsRestart.value = false; loadStatus() }, 3000)
+  } catch { restarting.value = false }
+}
+
+// Expose for child components
+provide('requestRestart', () => { needsRestart.value = true })
 
 // Global confirm dialog
 const confirmDialog = reactive({
@@ -392,6 +412,27 @@ table tbody tr { border-color: var(--border) !important; }
 table tbody tr:hover { background: var(--bg-hover) !important; }
 
 .mode-card.active { border-color: var(--accent) !important; }
+
+/* Restart banner */
+.restart-banner {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  background: linear-gradient(135deg, rgba(251,191,36,0.15), rgba(249,115,22,0.1));
+  border: 1px solid rgba(251,191,36,0.3); border-radius: 10px;
+  margin-bottom: 16px; color: #fbbf24; font-size: 0.88rem;
+}
+.restart-banner span { flex: 1; }
+.restart-banner-btn {
+  padding: 6px 16px; background: #f59e0b; color: #000; border: none;
+  border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 600;
+  transition: opacity 0.15s; white-space: nowrap;
+}
+.restart-banner-btn:hover { opacity: 0.85; }
+.restart-banner-btn:disabled { opacity: 0.5; cursor: wait; }
+.restart-banner-dismiss {
+  background: none; border: none; color: #fbbf24; cursor: pointer;
+  font-size: 1.2rem; line-height: 1; opacity: 0.6;
+}
+.restart-banner-dismiss:hover { opacity: 1; }
 
 /* Confirm modal */
 .confirm-overlay {

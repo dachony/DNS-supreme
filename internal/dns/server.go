@@ -69,6 +69,12 @@ func (s *Server) FlushCache() {
 	s.cache.Flush()
 }
 
+func (s *Server) ReloadTLS(tlsCfg *tls.Config) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tlsConfig = tlsCfg
+}
+
 func (s *Server) SetBlockPage(ip string, onBlock func(domain, reason string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
