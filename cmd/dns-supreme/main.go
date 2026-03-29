@@ -89,6 +89,15 @@ func main() {
 	// Start DNS server
 	dnsServer := dnsserver.NewServer(cfg.DNS, filterEngine.Check, logFn, tlsConfig)
 
+	// Restore persisted forwarders
+	if data := database.GetSetting("forwarders"); data != "" {
+		var fwds []string
+		if json.Unmarshal([]byte(data), &fwds) == nil && len(fwds) > 0 {
+			dnsServer.SetForwarders(fwds)
+			log.Printf("[Persistence] Restored %d forwarders", len(fwds))
+		}
+	}
+
 	// Connect zone lookup to database
 	dnsServer.SetZoneLookup(func(name, rtype string) ([]db.DNSRecord, error) {
 		return database.FindRecords(name, rtype)
