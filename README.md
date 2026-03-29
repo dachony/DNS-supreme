@@ -84,6 +84,60 @@ Open **http://localhost:5380** and login with `admin` / `admin`.
 | 5380 | TCP | Management panel (Web UI + API) |
 | 53443 | TCP | Management panel HTTPS / Block page HTTPS |
 
+## Installation
+
+### 1. Clone and start
+
+```bash
+git clone https://github.com/dachony/DNS-supreme.git
+cd DNS-supreme
+docker compose up -d
+```
+
+### 2. Check port availability
+
+DNS Supreme uses standard DNS ports. If you have another DNS service (systemd-resolved, dnsmasq, BIND) running on port 53, stop it first:
+
+```bash
+# Linux — disable systemd-resolved
+sudo systemctl stop systemd-resolved
+sudo systemctl disable systemd-resolved
+
+# Or change the ports in docker-compose.yml if you need non-standard mapping:
+# Example: map DNS to port 5353 instead of 53
+#   - "5353:53/udp"
+#   - "5353:53/tcp"
+```
+
+### 3. Configure your devices
+
+Point your devices or router DNS to the IP of the machine running DNS Supreme:
+
+```
+DNS Server: <your-server-ip>
+```
+
+### 4. Access management panel
+
+Open `http://<your-server-ip>:5380` in your browser.
+
+### Port customization
+
+If you need to change ports, edit `docker-compose.yml` before starting. The format is `HOST_PORT:CONTAINER_PORT`:
+
+```yaml
+ports:
+  - "5353:53/udp"     # Change 5353 to your preferred DNS port
+  - "5353:53/tcp"
+  - "8853:853/tcp"    # Change 8853 to your preferred DoT port
+  # ... etc
+```
+
+After changing ports, restart:
+```bash
+docker compose down && docker compose up -d
+```
+
 ## Configuration
 
 All configuration is done through the web UI at `http://localhost:5380`.
