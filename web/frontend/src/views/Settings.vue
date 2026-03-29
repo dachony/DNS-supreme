@@ -916,13 +916,38 @@ const mailNotifs = ref({
 })
 const mailMsg = ref('')
 
-async function saveMailSettings() {
-  mailMsg.value = 'Mail settings saved'
-  setTimeout(() => mailMsg.value = '', 3000)
+async function loadMailSettings() {
+  try {
+    const [cfg, notif] = await Promise.all([
+      axios.get('/api/mail/settings'),
+      axios.get('/api/mail/notifications'),
+    ])
+    if (cfg.data.host) mailSettings.value = cfg.data
+    mailNotifs.value = { ...mailNotifs.value, ...notif.data }
+  } catch {}
 }
+
+async function saveMailSettings() {
+  mailMsg.value = ''
+  try {
+    await axios.put('/api/mail/settings', mailSettings.value)
+    await axios.put('/api/mail/notifications', mailNotifs.value)
+    mailMsg.value = 'Mail settings saved'
+    setTimeout(() => mailMsg.value = '', 3000)
+  } catch (e: any) {
+    mailMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+  }
+}
+
 async function testMail() {
-  mailMsg.value = 'Test email sent — check your inbox'
-  setTimeout(() => mailMsg.value = '', 5000)
+  mailMsg.value = ''
+  try {
+    const { data } = await axios.post('/api/mail/test', { to: mailSettings.value.from })
+    mailMsg.value = `Test email sent to ${data.sent_to}`
+    setTimeout(() => mailMsg.value = '', 5000)
+  } catch (e: any) {
+    mailMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+  }
 }
 
 const certInfo = ref<any>(null)
@@ -1191,7 +1216,7 @@ function previewBlockPage() {
   w.document.write(html)
 }
 
-onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ban() })
+onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings() })
 </script>
 
 <style scoped>

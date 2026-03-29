@@ -1,7 +1,7 @@
 node_modules/
 dist/
 web/frontend/dist/
-dns-supreme
+/dns-supreme
 .env
 *.log
 pgdata/

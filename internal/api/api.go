@@ -13,6 +13,7 @@ import (
 	"github.com/dachony/dns-supreme/internal/db"
 	dnsserver "github.com/dachony/dns-supreme/internal/dns"
 	"github.com/dachony/dns-supreme/internal/filter"
+	"github.com/dachony/dns-supreme/internal/mailer"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -27,6 +28,7 @@ type Server struct {
 	dns        *dnsserver.Server
 	dnssec     *dnsserver.DNSSECManager
 	fail2ban   *Fail2Ban
+	mailer     *mailer.Mailer
 	router     *gin.Engine
 }
 
@@ -45,11 +47,13 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 		policies:   filter.NewPolicyManager(),
 		dns:        dnsServer,
 		fail2ban:   NewFail2Ban(),
+		mailer:     mailer.New(),
 		dnssec:     dnsserver.NewDNSSECManager(),
 		router:     router,
 	}
 
 	s.ensureDefaultAdmin()
+	s.LoadMailConfig()
 	s.setupRoutes()
 	return s
 }
@@ -126,6 +130,13 @@ func (s *Server) setupRoutes() {
 		protected.PUT("/fail2ban/settings", s.setFail2BanSettings)
 		protected.DELETE("/fail2ban/unban/:ip", s.unbanIP)
 		protected.PUT("/fail2ban/allowed-ips", s.setAllowedIPs)
+
+		// Mail
+		protected.GET("/mail/settings", s.getMailSettings)
+		protected.PUT("/mail/settings", s.setMailSettings)
+		protected.POST("/mail/test", s.sendTestMail)
+		protected.GET("/mail/notifications", s.getMailNotifications)
+		protected.PUT("/mail/notifications", s.setMailNotifications)
 
 		protected.GET("/network-protection", s.getNetProtectCategories)
 		protected.PUT("/network-protection/:id", s.setNetProtectCategory)
@@ -233,7 +244,16 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	if !auth.CheckPassword(user.PasswordHash, req.Password) {
-		s.fail2ban.RecordFail(clientIP)
+		banned := s.fail2ban.RecordFail(clientIP)
+		if banned {
+			// Send security alert if admin has email
+			admins, _ := s.db.GetAdminEmails()
+			for _, email := range admins {
+				go s.mailer.SendSecurityAlert(email,
+					"IP Banned",
+					fmt.Sprintf("IP %s was banned after too many failed login attempts for user '%s'", clientIP, req.Username))
+			}
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}

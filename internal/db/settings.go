@@ -160,6 +160,23 @@ func (d *Database) SaveSettings(settings map[string]string) error {
 	return tx.Commit()
 }
 
+// GetAdminEmails returns email addresses of all admin users
+func (d *Database) GetAdminEmails() ([]string, error) {
+	rows, err := d.db.Query("SELECT email FROM users WHERE role = 'admin' AND email != '' AND email IS NOT NULL")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var emails []string
+	for rows.Next() {
+		var email string
+		if rows.Scan(&email) == nil && email != "" {
+			emails = append(emails, email)
+		}
+	}
+	return emails, nil
+}
+
 // UserCount returns total user count
 func (d *Database) UserCountCheck() int {
 	var count int
