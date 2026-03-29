@@ -20,7 +20,7 @@ import (
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("=== DNS-supreme v0.1.0 ===")
+	log.Println("=== DNS-supreme v1.0.0 ===")
 
 	cfg := config.LoadFromEnv()
 

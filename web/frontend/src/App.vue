@@ -3,7 +3,7 @@
     <nav class="sidebar">
       <div class="logo">
         <h1>DNS Supreme</h1>
-        <span class="version">v0.1.0</span>
+        <span class="version">v1.0.0</span>
       </div>
       <ul class="nav-links">
         <li><router-link to="/" active-class="active" exact><span class="nav-icon nav-icon-dashboard"></span>Dashboard</router-link></li>

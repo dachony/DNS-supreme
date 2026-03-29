@@ -103,7 +103,7 @@ func (s *Server) setupRoutes() {
 	api.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "healthy",
-			"version": "0.1.0",
+			"version": "1.0.0",
 		})
 	})
 
@@ -827,7 +827,7 @@ func (s *Server) getStatus(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":                "running",
-		"version":               "0.1.0",
+		"version":               "1.0.0",
 		"total_domains":         totalDomains,
 		"total_lists":           totalLists,
 		"np_active_feeds":       npCats,
