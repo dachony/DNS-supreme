@@ -331,7 +331,7 @@
       <div class="np-categories">
         <div v-for="cat in npCategories" :key="cat.id" class="np-card" :class="{ enabled: cat.enabled }">
           <div class="np-card-top">
-            <div class="np-card-info">
+            <div class="np-card-info" @click="openNpDetail(cat)" style="cursor:pointer">
               <span class="np-card-name">{{ cat.name }}</span>
               <span class="np-card-desc">{{ cat.description }}</span>
             </div>
@@ -343,6 +343,39 @@
             </div>
           </div>
           <div v-if="cat.last_updated" class="np-card-updated">Updated: {{ formatNpDate(cat.last_updated) }}</div>
+        </div>
+      </div>
+
+      <!-- NP Detail Modal -->
+      <div v-if="npDetail" class="modal-overlay" @click.self="npDetail = null">
+        <div class="modal-detail">
+          <div class="modal-header">
+            <h3>{{ npDetail.name }}</h3>
+            <button class="modal-close" @click="npDetail = null">&times;</button>
+          </div>
+          <p class="np-detail-desc">{{ npDetail.description }}</p>
+          <div class="ld-meta">
+            <span v-if="npDetail.entry_count">{{ npDetail.entry_count.toLocaleString() }} entries</span>
+            <span v-if="npDetail.last_updated">Updated: {{ formatNpDate(npDetail.last_updated) }}</span>
+            <span :class="npDetail.enabled ? 'np-status-on' : 'np-status-off'">{{ npDetail.enabled ? 'Enabled' : 'Disabled' }}</span>
+          </div>
+          <div class="np-detail-sources">
+            <h4>Sources</h4>
+            <div v-for="src in npDetail.sources" :key="src" class="np-detail-source">
+              <a :href="src" target="_blank" rel="noopener">{{ src }}</a>
+            </div>
+          </div>
+          <div class="np-detail-entries">
+            <div class="ld-domains-header">
+              <h4>Sample Entries</h4>
+              <span v-if="npDetailEntries.length">{{ npDetailEntries.length }} shown</span>
+            </div>
+            <div v-if="npDetailLoading" class="ld-loading">Loading entries...</div>
+            <div v-else-if="npDetailEntries.length" class="ld-domain-list">
+              <div v-for="entry in npDetailEntries" :key="entry" class="ld-domain-row">{{ entry }}</div>
+            </div>
+            <div v-else class="empty-small">No entries loaded yet. Enable the feed and wait for it to refresh.</div>
+          </div>
         </div>
       </div>
 
@@ -878,6 +911,24 @@ function formatNpDate(d: string) {
   return new Date(d).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+const npDetail = ref<any>(null)
+const npDetailEntries = ref<string[]>([])
+const npDetailLoading = ref(false)
+
+async function openNpDetail(cat: any) {
+  npDetail.value = cat
+  npDetailEntries.value = []
+  npDetailLoading.value = true
+  try {
+    const { data } = await axios.get(`/api/network-protection/${cat.id}/entries`)
+    npDetailEntries.value = data.entries || []
+  } catch (e) {
+    npDetailEntries.value = []
+  } finally {
+    npDetailLoading.value = false
+  }
+}
+
 async function loadAll() {
   try {
     const [bl, cb, al, cats, geo, pol] = await Promise.all([
@@ -1408,6 +1459,18 @@ onMounted(() => {
 .np-card-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .np-card-count { color: var(--accent); font-size: 0.75rem; font-family: monospace; }
 .np-card-updated { color: var(--text-dim); font-size: 0.7rem; }
+.np-card-info:hover .np-card-name { color: var(--accent); }
+
+.np-detail-desc { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px; line-height: 1.5; }
+.np-detail-sources { margin-bottom: 16px; }
+.np-detail-sources h4 { color: var(--text-primary); font-size: 0.85rem; margin-bottom: 6px; }
+.np-detail-source { margin-bottom: 4px; }
+.np-detail-source a { color: var(--accent); font-size: 0.8rem; word-break: break-all; text-decoration: none; }
+.np-detail-source a:hover { text-decoration: underline; }
+.np-detail-entries { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.np-detail-entries h4 { color: var(--text-primary); font-size: 0.85rem; }
+.np-status-on { color: #22c55e; font-weight: 600; }
+.np-status-off { color: var(--text-dim); }
 
 /* NP toolbar */
 .np-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }

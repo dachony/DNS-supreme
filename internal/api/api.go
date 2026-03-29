@@ -159,6 +159,7 @@ func (s *Server) setupRoutes() {
 
 		protected.GET("/network-protection", s.getNetProtectCategories)
 		protected.PUT("/network-protection/:id", s.setNetProtectCategory)
+		protected.GET("/network-protection/:id/entries", s.getNetProtectEntries)
 		protected.GET("/network-protection/geo", s.getNetProtectGeo)
 		protected.PUT("/network-protection/geo", s.setNetProtectGeo)
 		protected.POST("/network-protection/refresh", s.refreshNetProtect)

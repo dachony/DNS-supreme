@@ -230,6 +230,32 @@ func (e *NetProtectEngine) SetRefreshInterval(minutes int) {
 	e.refreshInterval = time.Duration(minutes) * time.Minute
 }
 
+// GetCategoryEntries returns a sample of IPs/CIDRs from the given category (up to max)
+func (e *NetProtectEngine) GetCategoryEntries(id string, max int) ([]string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	cat, ok := e.categories[id]
+	if !ok {
+		return nil, fmt.Errorf("unknown category: %s", id)
+	}
+
+	result := make([]string, 0, max)
+	for ip := range cat.ips {
+		result = append(result, ip)
+		if len(result) >= max {
+			return result, nil
+		}
+	}
+	for _, cidr := range cat.cidrs {
+		result = append(result, cidr.String())
+		if len(result) >= max {
+			return result, nil
+		}
+	}
+	return result, nil
+}
+
 // Start begins background refresh of enabled feeds
 func (e *NetProtectEngine) Start() {
 	// Initial load of enabled categories

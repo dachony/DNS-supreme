@@ -958,10 +958,25 @@ const acmeUrl = ref('')
 const acmeChallenge = ref('dns-01')
 const acmeMsg = ref('')
 
-function exportCert(format: string, domain?: string) {
+async function exportCert(format: string, domain?: string) {
   const params = new URLSearchParams({ format })
   if (domain) params.set('domain', domain)
-  window.open(`/api/certs/export?${params}`, '_blank')
+  try {
+    const { data, headers } = await axios.get(`/api/certs/export?${params}`, { responseType: 'blob' })
+    const disposition = headers['content-disposition'] || ''
+    const match = disposition.match(/filename=(.+)/)
+    const filename = match ? match[1] : (format === 'der' ? 'dns-supreme-ca.crt' : 'dns-supreme-ca.pem')
+    const url = URL.createObjectURL(data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e: any) {
+    certMsg.value = e.response?.data?.error || 'Failed to export certificate'
+  }
 }
 
 async function loadAcmeConfig() {
@@ -1555,4 +1570,25 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 .btn-danger:hover { background: rgba(239,68,68,0.25); }
 .btn-danger-outline { padding: 9px 16px; background: none; color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem; transition: background 0.15s; }
 .btn-danger-outline:hover { background: rgba(239,68,68,0.1); }
+
+/* Users table */
+.users-left table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; margin-top: 8px;
+}
+.users-left table thead th {
+  padding: 10px 14px; text-align: left; font-size: 0.75rem; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;
+  background: var(--bg-input); border-bottom: 1px solid var(--border);
+}
+.users-left table tbody td {
+  padding: 10px 14px; font-size: 0.85rem; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+.users-left table tbody tr:last-child td { border-bottom: none; }
+.users-left table tbody tr { transition: background 0.12s; }
+.users-left table tbody tr:hover { background: var(--bg-input); }
+.users-left table td.username { color: var(--text-primary); font-weight: 600; }
+.users-left table td.actions { white-space: nowrap; }
 </style>

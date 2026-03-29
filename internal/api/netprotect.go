@@ -81,6 +81,20 @@ func (s *Server) saveNpCategories() {
 	}
 }
 
+func (s *Server) getNetProtectEntries(c *gin.Context) {
+	if s.netProtect == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "network protection not available"})
+		return
+	}
+	id := c.Param("id")
+	entries, err := s.netProtect.GetCategoryEntries(id, 100)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "entries": entries, "sample_size": len(entries)})
+}
+
 func (s *Server) refreshNetProtect(c *gin.Context) {
 	if s.netProtect == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "network protection not available"})
