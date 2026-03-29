@@ -348,14 +348,14 @@
 
       <!-- NP Detail Modal -->
       <div v-if="npDetail" class="modal-overlay" @click.self="npDetail = null">
-        <div class="modal-detail">
+        <div class="modal-detail" style="max-width:500px">
           <div class="modal-header">
             <h3>{{ npDetail.name }}</h3>
             <button class="modal-close" @click="npDetail = null">&times;</button>
           </div>
           <p class="np-detail-desc">{{ npDetail.description }}</p>
           <div class="ld-meta">
-            <span v-if="npDetail.entry_count">{{ npDetail.entry_count.toLocaleString() }} entries</span>
+            <span v-if="npDetail.entry_count">{{ npDetail.entry_count.toLocaleString() }} entries loaded</span>
             <span v-if="npDetail.last_updated">Updated: {{ formatNpDate(npDetail.last_updated) }}</span>
             <span :class="npDetail.enabled ? 'np-status-on' : 'np-status-off'">{{ npDetail.enabled ? 'Enabled' : 'Disabled' }}</span>
           </div>
@@ -364,17 +364,6 @@
             <div v-for="src in npDetail.sources" :key="src" class="np-detail-source">
               <a :href="src" target="_blank" rel="noopener">{{ src }}</a>
             </div>
-          </div>
-          <div class="np-detail-entries">
-            <div class="ld-domains-header">
-              <h4>Sample Entries</h4>
-              <span v-if="npDetailEntries.length">{{ npDetailEntries.length }} shown</span>
-            </div>
-            <div v-if="npDetailLoading" class="ld-loading">Loading entries...</div>
-            <div v-else-if="npDetailEntries.length" class="ld-domain-list">
-              <div v-for="entry in npDetailEntries" :key="entry" class="ld-domain-row">{{ entry }}</div>
-            </div>
-            <div v-else class="empty-small">No entries loaded yet. Enable the feed and wait for it to refresh.</div>
           </div>
         </div>
       </div>
@@ -912,21 +901,9 @@ function formatNpDate(d: string) {
 }
 
 const npDetail = ref<any>(null)
-const npDetailEntries = ref<string[]>([])
-const npDetailLoading = ref(false)
 
-async function openNpDetail(cat: any) {
+function openNpDetail(cat: any) {
   npDetail.value = cat
-  npDetailEntries.value = []
-  npDetailLoading.value = true
-  try {
-    const { data } = await axios.get(`/api/network-protection/${cat.id}/entries`)
-    npDetailEntries.value = data.entries || []
-  } catch (e) {
-    npDetailEntries.value = []
-  } finally {
-    npDetailLoading.value = false
-  }
 }
 
 async function loadAll() {
