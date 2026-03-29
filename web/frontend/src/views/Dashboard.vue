@@ -19,21 +19,33 @@
     </div>
 
     <div class="stats-grid" v-if="stats">
-      <div class="stat-card">
-        <div class="stat-value">{{ stats.total_queries?.toLocaleString() }}</div>
-        <div class="stat-label">Total Queries</div>
+      <div class="stat-card total">
+        <div class="stat-icon">Q</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.total_queries?.toLocaleString() }}</div>
+          <div class="stat-label">Total Queries</div>
+        </div>
       </div>
       <div class="stat-card blocked">
-        <div class="stat-value">{{ stats.blocked_queries?.toLocaleString() }}</div>
-        <div class="stat-label">Blocked</div>
+        <div class="stat-icon">B</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.blocked_queries?.toLocaleString() }}</div>
+          <div class="stat-label">Blocked</div>
+        </div>
       </div>
       <div class="stat-card allowed">
-        <div class="stat-value">{{ stats.allowed_queries?.toLocaleString() }}</div>
-        <div class="stat-label">Allowed</div>
+        <div class="stat-icon">A</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.allowed_queries?.toLocaleString() }}</div>
+          <div class="stat-label">Allowed</div>
+        </div>
       </div>
       <div class="stat-card percent">
-        <div class="stat-value">{{ stats.blocked_percent?.toFixed(1) }}%</div>
-        <div class="stat-label">Block Rate</div>
+        <div class="stat-icon">%</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.blocked_percent?.toFixed(1) }}%</div>
+          <div class="stat-label">Block Rate</div>
+        </div>
       </div>
     </div>
 
@@ -83,7 +95,7 @@
     </div>
 
     <div class="tables-row" v-if="stats">
-      <div class="table-card">
+      <div class="table-card top-domains">
         <h3>Top Domains</h3>
         <table>
           <tr v-for="d in stats.top_domains" :key="d.domain">
@@ -93,7 +105,7 @@
           <tr v-if="!stats.top_domains?.length"><td colspan="2" class="empty">No data</td></tr>
         </table>
       </div>
-      <div class="table-card">
+      <div class="table-card top-blocked">
         <h3>Top Blocked</h3>
         <table>
           <tr v-for="d in stats.top_blocked" :key="d.domain">
@@ -103,7 +115,7 @@
           <tr v-if="!stats.top_blocked?.length"><td colspan="2" class="empty">No data</td></tr>
         </table>
       </div>
-      <div class="table-card">
+      <div class="table-card top-clients">
         <h3>Top Clients</h3>
         <table>
           <tr v-for="c in stats.top_clients" :key="c.client_ip">
@@ -178,15 +190,21 @@ const chartData = computed(() => {
   }
 })
 
-const chartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: { legend: { labels: { color: '#94a3b8' } } },
-  scales: {
-    x: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
-    y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+const chartOptions = computed(() => {
+  const style = getComputedStyle(document.documentElement)
+  const muted = style.getPropertyValue('--text-muted').trim() || '#64748b'
+  const dim = style.getPropertyValue('--text-dim').trim() || '#475569'
+  const border = style.getPropertyValue('--border').trim() || '#1e293b'
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: muted } } },
+    scales: {
+      x: { ticks: { color: dim }, grid: { color: border } },
+      y: { ticks: { color: dim }, grid: { color: border } },
+    }
   }
-}
+})
 
 async function loadStats(h: number) {
   hours.value = h
@@ -200,7 +218,7 @@ async function loadStats(h: number) {
     stats.value = statsResp.data
     sysMetrics.value = metricsResp.data
   } catch (e) {
-    console.error('Failed to load stats', e)
+    // Stats load failed silently — auto-refresh will retry
   } finally {
     loading.value = false
   }
@@ -248,67 +266,101 @@ onUnmounted(() => {
   margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
 }
 .toolbar-label {
-  font-size: 0.8rem; color: #64748b; margin-right: 4px;
+  font-size: 0.8rem; color: var(--text-muted); margin-right: 4px;
 }
 .time-filter, .refresh-filter {
   display: flex; gap: 6px; align-items: center;
 }
 .time-filter button, .refresh-filter button {
-  padding: 6px 14px; border: 1px solid #334155; background: #1e293b;
-  color: #94a3b8; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+  padding: 6px 14px; border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-secondary); border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+  transition: all 0.15s;
 }
-.time-filter button.active { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
-.refresh-filter button.active { background: #8b5cf6; color: #fff; border-color: #8b5cf6; }
+.time-filter button:hover, .refresh-filter button:hover { border-color: var(--text-dim); color: var(--text-primary); }
+.time-filter button.active { background: linear-gradient(135deg, #0ea5e9, #38bdf8); color: #fff; border-color: transparent; }
+.refresh-filter button.active { background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff; border-color: transparent; }
 
+/* Stat cards with colored accents */
 .stats-grid {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;
 }
 .stat-card {
-  background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155;
+  background: var(--bg-card); border-radius: 12px; padding: 18px; border: 1px solid var(--border);
+  transition: all 0.2s; display: flex; align-items: center; gap: 14px;
+  border-top: 3px solid var(--border);
 }
-.stat-value { font-size: 2rem; font-weight: 700; color: #f1f5f9; }
-.stat-label { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
-.stat-card.blocked .stat-value { color: #ef4444; }
-.stat-card.allowed .stat-value { color: #22c55e; }
-.stat-card.percent .stat-value { color: #f59e0b; }
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.stat-card.total { border-top-color: #38bdf8; }
+.stat-card.blocked { border-top-color: #f87171; }
+.stat-card.allowed { border-top-color: #34d399; }
+.stat-card.percent { border-top-color: #fbbf24; }
 
+.stat-icon {
+  width: 40px; height: 40px; border-radius: 10px; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 0.85rem; font-weight: 800; flex-shrink: 0;
+}
+.stat-card.total .stat-icon { background: rgba(56,189,248,0.12); color: #38bdf8; }
+.stat-card.blocked .stat-icon { background: rgba(248,113,113,0.12); color: #f87171; }
+.stat-card.allowed .stat-icon { background: rgba(52,211,153,0.12); color: #34d399; }
+.stat-card.percent .stat-icon { background: rgba(251,191,36,0.12); color: #fbbf24; }
+
+.stat-content { flex: 1; }
+.stat-value { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
+.stat-label { font-size: 0.82rem; color: var(--text-muted); margin-top: 2px; }
+.stat-card.blocked .stat-value { color: #f87171; }
+.stat-card.allowed .stat-value { color: #34d399; }
+.stat-card.percent .stat-value { color: #fbbf24; }
+
+/* Chart */
 .charts-row { margin-bottom: 24px; }
 .chart-card {
-  background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155;
+  background: var(--bg-card); border-radius: 12px; padding: 20px; border: 1px solid var(--border);
 }
-.chart-card h3 { margin-bottom: 16px; font-size: 1rem; color: #94a3b8; }
+.chart-card h3 { margin-bottom: 16px; font-size: 1rem; color: var(--text-secondary); }
 .chart-container { height: 250px; }
 
+/* Table cards with colored left borders */
 .tables-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .table-card {
-  background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155;
+  background: var(--bg-card); border-radius: 12px; padding: 20px; border: 1px solid var(--border);
+  border-left: 3px solid var(--border); transition: all 0.15s;
 }
-.table-card h3 { margin-bottom: 12px; font-size: 1rem; color: #94a3b8; }
-table { width: 100%; }
-tr { border-bottom: 1px solid #334155; }
-td { padding: 8px 4px; font-size: 0.85rem; }
-.domain { color: #e2e8f0; word-break: break-all; }
-.count { text-align: right; color: #64748b; }
-.empty { text-align: center; color: #475569; padding: 20px; }
-.loading { text-align: center; padding: 40px; color: #64748b; }
+.table-card.top-domains { border-left-color: #38bdf8; }
+.table-card.top-blocked { border-left-color: #f87171; }
+.table-card.top-clients { border-left-color: #a78bfa; }
 
-/* System metrics */
+.table-card.top-domains h3 { color: #38bdf8; }
+.table-card.top-blocked h3 { color: #f87171; }
+.table-card.top-clients h3 { color: #a78bfa; }
+
+.table-card h3 { margin-bottom: 12px; font-size: 0.95rem; }
+table { width: 100%; }
+tr { border-bottom: 1px solid var(--border); }
+td { padding: 8px 4px; font-size: 0.85rem; }
+.domain { color: var(--text-primary); word-break: break-all; }
+.count { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.empty { text-align: center; color: var(--text-dim); padding: 20px; }
+.loading { text-align: center; padding: 40px; color: var(--text-muted); }
+
+/* System metrics with gradient bars */
 .system-grid {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;
 }
 .sys-card {
-  background: var(--bg-card, #1e293b); border-radius: 12px; padding: 16px;
-  border: 1px solid var(--border, #334155);
+  background: var(--bg-card); border-radius: 12px; padding: 16px;
+  border: 1px solid var(--border); transition: all 0.2s;
 }
+.sys-card:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 .sys-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.sys-title { color: var(--text-muted, #64748b); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.sys-value-big { color: var(--text-primary, #f1f5f9); font-size: 1.4rem; font-weight: 700; }
+.sys-title { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.sys-value-big { color: var(--text-primary); font-size: 1.4rem; font-weight: 700; }
 .sys-bar {
-  height: 6px; background: rgba(100,116,139,0.2); border-radius: 3px; overflow: hidden; margin-bottom: 8px;
+  height: 6px; background: rgba(100,116,139,0.15); border-radius: 3px; overflow: hidden; margin-bottom: 8px;
 }
-.sys-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
-.sys-bar-fill.bar-green { background: #22c55e; }
-.sys-bar-fill.bar-yellow { background: #eab308; }
-.sys-bar-fill.bar-red { background: #ef4444; }
-.sys-detail { color: var(--text-muted, #64748b); font-size: 0.75rem; line-height: 1.5; }
+.sys-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease-out; }
+.sys-bar-fill.bar-green { background: linear-gradient(90deg, #22c55e, #4ade80); }
+.sys-bar-fill.bar-yellow { background: linear-gradient(90deg, #eab308, #facc15); }
+.sys-bar-fill.bar-red { background: linear-gradient(90deg, #ef4444, #f87171); }
+.sys-detail { color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; }
 </style>

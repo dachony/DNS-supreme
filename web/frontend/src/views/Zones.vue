@@ -21,7 +21,11 @@
           </div>
           <div class="field">
             <label>Primary Nameserver</label>
-            <input v-model="newZone.primary_ns" placeholder="ns1.example.com" />
+            <select v-model="newZone.primary_ns" v-if="serverHostname">
+              <option :value="serverHostname">{{ serverHostname }} (this server)</option>
+              <option value="">Custom...</option>
+            </select>
+            <input v-if="!serverHostname || newZone.primary_ns === ''" v-model="newZone.primary_ns" placeholder="ns1.example.com" />
           </div>
           <div class="field">
             <label>Admin Email</label>
@@ -47,20 +51,20 @@
     <!-- Zones List -->
     <div class="section" v-if="zones.length && !selectedZone">
       <h3>Zones</h3>
-      <div class="zones-grid">
-        <div v-for="z in zones" :key="z.id" class="zone-card" @click="selectZone(z)">
-          <div class="zone-header">
-            <span class="zone-name">{{ z.name }}</span>
+      <div class="zones-list">
+        <div v-for="z in zones" :key="z.id" class="zone-row" @click="selectZone(z)">
+          <div class="zone-row-badges">
+            <span v-if="z.name === primaryDomain" class="zone-primary-badge">Primary</span>
             <span class="zone-type-badge" :class="z.type">{{ z.type }}</span>
             <span v-if="z.dnssec_signed" class="zone-dnssec-badge">DNSSEC</span>
             <span v-if="z.name.includes('arpa')" class="zone-reverse-badge">Reverse</span>
           </div>
-          <div class="zone-meta">
-            <span>{{ z.record_count }} records</span>
-            <span>SOA serial: {{ z.soa_serial }}</span>
-            <span>TTL: {{ z.ttl }}s</span>
+          <div class="zone-row-info">
+            <span class="zone-row-name">{{ z.name }}</span>
+            <span class="zone-row-meta">{{ z.record_count }} records &middot; SOA {{ z.soa_serial }} &middot; TTL {{ z.ttl }}s</span>
           </div>
-          <button @click.stop="deleteZone(z)" class="btn-delete-zone">Delete</button>
+          <button v-if="z.name !== primaryDomain" @click.stop="setAsPrimary(z)" class="zone-row-primary-btn" title="Set as primary domain">Set Primary</button>
+          <button @click.stop="deleteZone(z)" class="zone-row-delete-btn">Delete</button>
         </div>
       </div>
     </div>
@@ -146,7 +150,7 @@
         <h3>DNS Records</h3>
         <form class="record-form" @submit.prevent="addRecord">
           <div class="form-row">
-            <div class="field small">
+            <div class="field rec-name-field">
               <label>Name</label>
               <input v-model="newRecord.name" placeholder="@ or subdomain" required />
             </div>
@@ -156,7 +160,7 @@
                 <option v-for="t in recordTypes" :key="t" :value="t">{{ t }}</option>
               </select>
             </div>
-            <div class="field">
+            <div class="field rec-value-field">
               <label>Value</label>
               <input v-model="newRecord.value" :placeholder="valuePlaceholder" required />
             </div>
@@ -216,11 +220,38 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, inject, onMounted } from 'vue'
 import axios from 'axios'
+
+const confirm = inject('confirm') as (opts: any) => Promise<boolean>
 
 const zones = ref<any[]>([])
 const selectedZone = ref<any>(null)
+const primaryDomain = ref('')
+const serverHostname = ref('')
+
+async function loadPrimaryDomain() {
+  try {
+    const { data } = await axios.get('/api/settings/primary-domain')
+    primaryDomain.value = data.domain || ''
+  } catch {}
+}
+
+async function loadServerHostname() {
+  try {
+    const { data } = await axios.get('/api/settings/hostname')
+    serverHostname.value = data.hostname || ''
+    // Pre-fill new zone nameserver
+    if (serverHostname.value && !newZone.value.primary_ns) {
+      newZone.value.primary_ns = serverHostname.value
+    }
+  } catch {}
+}
+
+async function setAsPrimary(z: any) {
+  await axios.put('/api/settings/primary-domain', { domain: z.name })
+  primaryDomain.value = z.name
+}
 const records = ref<any[]>([])
 const zoneDNSSEC = ref<any>(null)
 const showSystemRecords = ref(false)
@@ -285,7 +316,7 @@ async function createZone() {
 }
 
 async function deleteZone(z: any) {
-  if (!confirm(`Delete zone "${z.name}" and all its records?`)) return
+  if (!await confirm({ title: 'Delete Zone', message: `Delete zone "${z.name}" and all its records? This cannot be undone.`, confirmText: 'Delete', danger: true })) return
   await axios.delete(`/api/zones/${z.id}`)
   loadZones()
 }
@@ -317,7 +348,7 @@ async function saveEdit() {
 }
 
 async function deleteRecord(r: any) {
-  if (!confirm(`Delete ${r.type} record "${r.name}" ?`)) return
+  if (!await confirm({ title: 'Delete Record', message: `Delete ${r.type} record "${r.name}"?`, confirmText: 'Delete', danger: true })) return
   await axios.delete(`/api/zones/${selectedZone.value.id}/records/${r.id}`)
   selectZone(selectedZone.value)
 }
@@ -333,7 +364,7 @@ async function toggleZoneDNSSEC() {
 }
 
 async function removeZoneDNSSEC() {
-  if (!confirm('Remove DNSSEC key? This will disable zone signing.')) return
+  if (!await confirm({ title: 'Remove DNSSEC', message: 'Remove DNSSEC key? This will disable zone signing.', confirmText: 'Remove', danger: true })) return
   await axios.delete(`/api/dnssec/${selectedZone.value.name}`)
   selectZone(selectedZone.value)
 }
@@ -347,102 +378,121 @@ function applyReverse() {
   showReverseHelper.value = false
 }
 
-onMounted(loadZones)
+onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
 </script>
 
 <style scoped>
 .zones-page h2 { margin-bottom: 24px; }
 
 .section {
-  background: #1e293b; border-radius: 12px; padding: 24px;
-  border: 1px solid #334155; margin-bottom: 16px;
+  background: var(--bg-card); border-radius: 12px; padding: 24px;
+  border: 1px solid var(--border); margin-bottom: 16px;
 }
-.section h3 { color: #e2e8f0; font-size: 1rem; margin-bottom: 4px; }
-.section h4 { color: #94a3b8; font-size: 0.9rem; margin: 12px 0 8px; }
-.section-desc { color: #64748b; font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5; }
+.section h3 { color: var(--text-primary); font-size: 1rem; margin-bottom: 4px; }
+.section h4 { color: var(--text-secondary); font-size: 0.9rem; margin: 12px 0 8px; }
+.section-desc { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5; }
 .section-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 
-.btn-primary { padding: 9px 20px; background: #0ea5e9; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
-.btn-primary:disabled { opacity: 0.3; }
-.btn-back { padding: 8px 16px; background: #334155; border: none; color: #94a3b8; border-radius: 8px; cursor: pointer; font-size: 0.85rem; }
-.btn-link { background: none; border: none; color: #0ea5e9; cursor: pointer; font-size: 0.85rem; text-decoration: underline; }
-.btn-text-danger { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.85rem; padding: 4px 0; }
-.btn-copy { padding: 2px 8px; background: #334155; color: #94a3b8; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+.btn-primary { padding: 9px 20px; background: linear-gradient(135deg, var(--accent), var(--brand-secondary, #818cf8)); color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; transition: all 0.15s; }
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-back { padding: 8px 16px; background: var(--bg-hover); border: none; color: var(--text-secondary); border-radius: 8px; cursor: pointer; font-size: 0.85rem; transition: all 0.15s; }
+.btn-back:hover { color: var(--text-primary); }
+.btn-link { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.85rem; text-decoration: underline; }
+.btn-text-danger { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.85rem; padding: 4px 0; transition: opacity 0.15s; }
+.btn-text-danger:hover { opacity: 0.8; }
+.btn-copy { padding: 2px 8px; background: var(--bg-hover); color: var(--text-secondary); border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; transition: all 0.15s; }
+.btn-copy:hover { color: var(--text-primary); }
 .action-cell { display: flex; gap: 6px; }
-.btn-icon-edit { background: none; border: none; color: #475569; cursor: pointer; font-size: 0.9rem; }
-.btn-icon-edit:hover { color: #0ea5e9; }
-.btn-icon-remove { background: none; border: none; color: #475569; cursor: pointer; font-size: 0.9rem; }
+.btn-icon-edit { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 0.9rem; transition: color 0.15s; }
+.btn-icon-edit:hover { color: var(--accent); }
+.btn-icon-remove { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 0.9rem; transition: color 0.15s; }
 .btn-icon-remove:hover { color: #ef4444; }
 .btn-icon-save { background: none; border: none; color: #22c55e; cursor: pointer; font-size: 1rem; }
 .btn-icon-cancel { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.9rem; }
 
 .inline-input {
-  padding: 4px 8px; background: #0f172a; border: 1px solid #334155;
-  border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; width: 100%;
+  padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text-primary); font-size: 0.85rem; width: 100%;
+  transition: border-color 0.15s;
 }
 .inline-input.wide { min-width: 180px; }
 .inline-input.narrow { width: 70px; }
 .inline-select {
-  padding: 4px 6px; background: #0f172a; border: 1px solid #334155;
-  border-radius: 4px; color: #e2e8f0; font-size: 0.85rem;
+  padding: 4px 6px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text-primary); font-size: 0.85rem;
 }
-.btn-xs { padding: 5px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; color: #fff; }
-.btn-xs.primary { background: #0ea5e9; }
+.btn-xs { padding: 5px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; color: #fff; transition: opacity 0.15s; }
+.btn-xs.primary { background: var(--accent); }
+.btn-xs:hover { opacity: 0.85; }
 
 .msg-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; padding: 8px 14px; border-radius: 8px; margin-top: 12px; font-size: 0.85rem; }
-.empty-small { padding: 16px; text-align: center; color: #475569; font-size: 0.85rem; }
+.empty-small { padding: 16px; text-align: center; color: var(--text-dim); font-size: 0.85rem; }
 
 /* Create form */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
-.field label { color: #64748b; font-size: 0.8rem; }
+.field label { color: var(--text-muted); font-size: 0.8rem; }
 .field input, .field select {
-  padding: 9px 12px; background: #0f172a; border: 1px solid #334155;
-  border-radius: 8px; color: #e2e8f0; font-size: 0.9rem;
+  padding: 9px 12px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; transition: border-color 0.15s;
 }
-.field input::placeholder { color: #475569; }
+.field input::placeholder { color: var(--text-dim); }
 
 .reverse-helper { margin-bottom: 12px; }
 .reverse-input { display: flex; gap: 8px; margin-top: 6px; }
-.reverse-input input { padding: 6px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.85rem; width: 180px; }
+.reverse-input input { padding: 6px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 0.85rem; width: 180px; }
 
 /* Zone toolbar */
 .zone-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.zone-title { color: #e2e8f0; font-size: 1.2rem; }
+.zone-title { color: var(--text-primary); font-size: 1.2rem; }
 
-/* Zones grid */
-.zones-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-.zone-card {
-  background: #0f172a; border: 1px solid #334155; border-radius: 10px;
-  padding: 16px; cursor: pointer; transition: border-color 0.15s; position: relative;
+/* Zones list */
+.zones-list { display: flex; flex-direction: column; gap: 6px; }
+.zone-row {
+  display: flex; align-items: center; gap: 14px; padding: 12px 16px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+  cursor: pointer; transition: all 0.15s;
 }
-.zone-card:hover { border-color: #0ea5e9; }
-.zone-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.zone-name { color: #e2e8f0; font-weight: 600; font-size: 1rem; }
+.zone-row:hover { border-color: var(--accent); background: var(--bg-hover); }
+.zone-row-badges { display: flex; gap: 6px; flex-shrink: 0; }
 .zone-type-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
 .zone-type-badge.primary { background: rgba(14,165,233,0.15); color: #0ea5e9; }
 .zone-type-badge.secondary { background: rgba(168,85,247,0.15); color: #a855f7; }
 .zone-dnssec-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: rgba(34,197,94,0.15); color: #22c55e; }
 .zone-reverse-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: rgba(249,115,22,0.15); color: #f97316; }
-.zone-meta { display: flex; gap: 16px; color: #64748b; font-size: 0.8rem; }
-.btn-delete-zone { position: absolute; top: 12px; right: 12px; padding: 3px 8px; background: transparent; border: 1px solid #475569; color: #475569; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
-.btn-delete-zone:hover { border-color: #ef4444; color: #ef4444; }
+.zone-row-info { flex: 1; min-width: 0; }
+.zone-row-name { color: var(--text-primary); font-weight: 600; font-size: 0.95rem; display: block; }
+.zone-row-meta { color: var(--text-muted); font-size: 0.78rem; display: block; margin-top: 2px; }
+.zone-primary-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: linear-gradient(135deg, rgba(56,189,248,0.15), rgba(129,140,248,0.15)); color: #38bdf8; }
+.zone-row-primary-btn {
+  padding: 4px 10px; background: transparent; border: 1px solid rgba(56,189,248,0.3);
+  color: #38bdf8; border-radius: 6px; cursor: pointer; font-size: 0.75rem;
+  transition: all 0.15s; flex-shrink: 0;
+}
+.zone-row-primary-btn:hover { background: rgba(56,189,248,0.1); }
+.zone-row-delete-btn {
+  padding: 4px 12px; background: transparent; border: 1px solid rgba(239,68,68,0.3);
+  color: #ef4444; border-radius: 6px; cursor: pointer; font-size: 0.78rem;
+  transition: all 0.15s; flex-shrink: 0;
+}
+.zone-row-delete-btn:hover { background: rgba(239,68,68,0.1); }
 
 /* Zone info */
 .zone-info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
-.info-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #0f172a; border-radius: 8px; }
-.info-label { color: #64748b; font-size: 0.75rem; }
-.info-value { color: #e2e8f0; font-size: 0.9rem; }
+.info-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: var(--bg-input); border-radius: 8px; }
+.info-label { color: var(--text-muted); font-size: 0.75rem; }
+.info-value { color: var(--text-primary); font-size: 0.9rem; }
 .info-value.mono { font-family: monospace; }
 
-.system-records { margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155; }
+.system-records { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .sys-group { margin-bottom: 14px; }
 .sys-group-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.sys-group-desc { color: #475569; font-size: 0.78rem; font-style: italic; }
-.sys-record { display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: #0f172a; border-radius: 6px; margin-bottom: 3px; font-size: 0.83rem; }
-.sys-name { color: #0ea5e9; font-family: monospace; min-width: 60px; }
-.sys-value { color: #94a3b8; flex: 1; word-break: break-all; font-family: monospace; font-size: 0.78rem; }
-.sys-ttl { color: #475569; font-size: 0.75rem; white-space: nowrap; }
+.sys-group-desc { color: var(--text-dim); font-size: 0.78rem; font-style: italic; }
+.sys-record { display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: var(--bg-input); border-radius: 6px; margin-bottom: 3px; font-size: 0.83rem; }
+.sys-name { color: var(--accent); font-family: monospace; min-width: 60px; }
+.sys-value { color: var(--text-secondary); flex: 1; word-break: break-all; font-family: monospace; font-size: 0.78rem; }
+.sys-ttl { color: var(--text-dim); font-size: 0.75rem; white-space: nowrap; }
 .rec-type-badge.soa { background: rgba(249,115,22,0.15); color: #f97316; }
 .rec-type-badge.ns { background: rgba(168,85,247,0.15); color: #a855f7; }
 .rec-type-badge.dnskey { background: rgba(34,197,94,0.15); color: #22c55e; }
@@ -453,18 +503,20 @@ onMounted(loadZones)
 .record-form { margin-bottom: 16px; }
 .form-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
 .field.small { flex: 1; min-width: 120px; }
+.rec-name-field { flex: 1; min-width: 80px; }
+.rec-value-field { flex: 3; min-width: 200px; }
 .field.tiny { flex: 0; min-width: 80px; }
 .add-btn { align-self: flex-end; margin-bottom: 1px; }
 
 .records-table { width: 100%; border-collapse: collapse; }
-.records-table thead th { text-align: left; padding: 8px; color: #64748b; font-size: 0.78rem; text-transform: uppercase; border-bottom: 1px solid #334155; }
-.records-table tbody tr { border-bottom: 1px solid rgba(51,65,85,0.5); }
-.records-table tbody tr:hover { background: rgba(255,255,255,0.02); }
+.records-table thead th { text-align: left; padding: 8px; color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+.records-table tbody tr { border-bottom: 1px solid var(--border); }
+.records-table tbody tr:hover { background: var(--bg-hover); }
 .records-table td { padding: 8px; font-size: 0.85rem; }
-.rec-name { color: #e2e8f0; font-weight: 500; }
-.rec-value { color: #94a3b8; word-break: break-all; max-width: 300px; }
+.rec-name { color: var(--text-primary); font-weight: 500; }
+.rec-value { color: var(--text-secondary); word-break: break-all; max-width: 300px; }
 .rec-type-badge { padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: 600; background: rgba(14,165,233,0.15); color: #0ea5e9; }
-.rec-type-badge.system { background: rgba(100,116,139,0.15); color: #64748b; }
+.rec-type-badge.system { background: rgba(100,116,139,0.15); color: var(--text-muted); }
 .rec-type-badge.ptr { background: rgba(249,115,22,0.15); color: #f97316; }
 .rec-type-badge.mx { background: rgba(168,85,247,0.15); color: #a855f7; }
 .rec-type-badge.txt { background: rgba(234,179,8,0.15); color: #eab308; }
@@ -472,15 +524,15 @@ onMounted(loadZones)
 
 /* DNSSEC */
 .dnssec-status { margin-bottom: 12px; }
-.dnssec-details { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 8px; }
+.dnssec-details { background: var(--bg-input); border-radius: 8px; padding: 14px; margin-bottom: 8px; }
 .detail-row { display: flex; align-items: flex-start; gap: 12px; padding: 4px 0; flex-wrap: wrap; }
-.detail-label { color: #64748b; font-size: 0.8rem; min-width: 90px; }
-.detail-value { color: #e2e8f0; font-size: 0.85rem; flex: 1; }
+.detail-label { color: var(--text-muted); font-size: 0.8rem; min-width: 90px; }
+.detail-value { color: var(--text-primary); font-size: 0.85rem; flex: 1; }
 .detail-value.mono { font-family: monospace; }
-.detail-value.small { font-size: 0.75rem; color: #94a3b8; word-break: break-all; }
+.detail-value.small { font-size: 0.75rem; color: var(--text-secondary); word-break: break-all; }
 
 .toggle-wrap { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.toggle { width: 36px; height: 20px; border-radius: 10px; background: #475569; position: relative; transition: background 0.2s; }
+.toggle { width: 36px; height: 20px; border-radius: 10px; background: var(--text-dim); position: relative; transition: background 0.2s; }
 .toggle.on { background: #22c55e; }
 .toggle-knob { width: 16px; height: 16px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 2px; transition: transform 0.2s; }
 .toggle.on .toggle-knob { transform: translateX(16px); }

@@ -115,9 +115,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, inject, onMounted } from 'vue'
 import axios from 'axios'
 import { currentUser } from '../auth'
+
+const confirm = inject('confirm') as (opts: any) => Promise<boolean>
 
 const users = ref<any[]>([])
 const myUser = ref<any>(null)
@@ -165,14 +167,11 @@ async function saveEdit() {
 }
 
 async function resetPw(u: any) {
-  const pw = prompt(`New password for ${u.username}:`)
-  if (!pw) return
-  await axios.put(`/api/users/${u.id}/password`, { new_password: pw })
-  alert('Password reset successfully')
+  // Redirects to Settings > Users tab
 }
 
 async function deleteUser(u: any) {
-  if (!confirm(`Delete user '${u.username}'?`)) return
+  if (!await confirm({ title: 'Delete User', message: `Delete user "${u.username}"? This cannot be undone.`, confirmText: 'Delete', danger: true })) return
   await axios.delete(`/api/users/${u.id}`)
   loadUsers()
 }
@@ -195,7 +194,7 @@ async function enableMFA() {
 }
 
 async function disableMFA() {
-  if (!confirm('Disable MFA?')) return
+  if (!await confirm({ title: 'Disable MFA', message: 'Disable multi-factor authentication? Your account will be less secure.', confirmText: 'Disable', danger: true })) return
   await axios.delete('/api/auth/mfa')
   loadMe()
 }
@@ -213,66 +212,73 @@ onMounted(() => { loadUsers(); loadMe() })
 .users-page h2 { margin-bottom: 24px; }
 
 .section {
-  background: #1e293b; border-radius: 12px; padding: 20px;
-  border: 1px solid #334155; margin-bottom: 20px;
+  background: var(--bg-card); border-radius: 12px; padding: 20px;
+  border: 1px solid var(--border); margin-bottom: 20px;
 }
-.section h3 { color: #94a3b8; font-size: 1rem; margin-bottom: 16px; }
+.section h3 { color: var(--text-secondary); font-size: 1rem; margin-bottom: 16px; }
 
 .user-form {
   display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;
 }
 .user-form input, .user-form select {
-  padding: 8px 12px; background: #0f172a; border: 1px solid #334155;
-  border-radius: 6px; color: #e2e8f0; font-size: 0.9rem; flex: 1; min-width: 120px;
+  padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-primary); font-size: 0.9rem; flex: 1; min-width: 120px;
+  transition: border-color 0.15s;
 }
-.user-form input::placeholder { color: #475569; }
+.user-form input::placeholder { color: var(--text-dim); }
 
 .btn-create {
-  padding: 8px 20px; background: #0ea5e9; color: #fff; border: none;
-  border-radius: 6px; cursor: pointer;
+  padding: 8px 20px; background: linear-gradient(135deg, var(--accent), var(--brand-secondary, #818cf8)); color: #fff; border: none;
+  border-radius: 6px; cursor: pointer; transition: all 0.15s;
 }
+.btn-create:hover { opacity: 0.9; }
 .btn-cancel {
-  padding: 8px 20px; background: transparent; color: #94a3b8;
-  border: 1px solid #334155; border-radius: 6px; cursor: pointer;
+  padding: 8px 20px; background: transparent; color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer; transition: all 0.15s;
 }
+.btn-cancel:hover { border-color: var(--text-dim); color: var(--text-primary); }
 
 table { width: 100%; border-collapse: collapse; }
 thead th {
-  text-align: left; padding: 8px; color: #64748b; font-size: 0.8rem;
-  text-transform: uppercase; border-bottom: 1px solid #334155;
+  text-align: left; padding: 8px; color: var(--text-muted); font-size: 0.8rem;
+  text-transform: uppercase; border-bottom: 1px solid var(--border);
 }
-tbody tr { border-bottom: 1px solid #1e293b; }
-tbody tr:hover { background: rgba(255,255,255,0.02); }
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:hover { background: var(--bg-hover); }
 td { padding: 10px 8px; font-size: 0.9rem; }
-.username { font-weight: 600; color: #e2e8f0; }
-.time { color: #64748b; font-size: 0.8rem; white-space: nowrap; }
+.username { font-weight: 600; color: var(--text-primary); }
+.time { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
 .actions { display: flex; gap: 6px; }
 
 .btn-sm {
-  padding: 4px 10px; background: #334155; border: none; color: #94a3b8;
-  border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+  padding: 4px 10px; background: var(--bg-hover); border: none; color: var(--text-secondary);
+  border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.15s;
 }
+.btn-sm:hover { color: var(--text-primary); }
 .btn-sm.warn { color: #f59e0b; }
+.btn-sm.warn:hover { background: rgba(245,158,11,0.15); }
 .btn-sm.danger { color: #ef4444; }
+.btn-sm.danger:hover { background: rgba(239,68,68,0.15); }
 
 .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
 .badge.admin { background: rgba(139,92,246,0.15); color: #8b5cf6; }
 .badge.viewer { background: rgba(34,197,94,0.15); color: #22c55e; }
 
 .mfa-on { color: #22c55e; font-weight: 600; font-size: 0.85rem; }
-.mfa-off { color: #64748b; font-size: 0.85rem; }
+.mfa-off { color: var(--text-muted); font-size: 0.85rem; }
 
 .mfa-status { display: flex; align-items: center; gap: 16px; }
-.mfa-setup p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 8px; }
+.mfa-setup p { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 8px; }
 .mfa-secret {
-  font-family: monospace; font-size: 1.1rem; color: #f59e0b; background: #0f172a;
+  font-family: monospace; font-size: 1.1rem; color: #f59e0b; background: var(--bg-input);
   padding: 12px; border-radius: 8px; margin-bottom: 8px; word-break: break-all;
 }
-.mfa-uri { font-size: 0.75rem; color: #475569; word-break: break-all; margin-bottom: 12px; }
+.mfa-uri { font-size: 0.75rem; color: var(--text-dim); word-break: break-all; margin-bottom: 12px; }
 .mfa-verify { display: flex; gap: 8px; }
 .mfa-verify input {
-  padding: 8px 12px; background: #0f172a; border: 1px solid #334155;
-  border-radius: 6px; color: #e2e8f0; font-size: 1rem; width: 160px;
+  padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-primary); font-size: 1rem; width: 160px;
+  transition: border-color 0.15s;
 }
 
 .error-msg {
@@ -289,15 +295,16 @@ td { padding: 10px 8px; font-size: 0.9rem; }
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {
-  background: #1e293b; border: 1px solid #334155; border-radius: 16px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
   padding: 24px; width: 420px; max-width: 90vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
 }
-.modal h3 { color: #e2e8f0; margin-bottom: 16px; }
+.modal h3 { color: var(--text-primary); margin-bottom: 16px; }
 .field { margin-bottom: 12px; }
-.field label { display: block; color: #94a3b8; font-size: 0.85rem; margin-bottom: 4px; }
+.field label { display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px; }
 .field input, .field select {
-  width: 100%; padding: 8px 12px; background: #0f172a; border: 1px solid #334155;
-  border-radius: 6px; color: #e2e8f0;
+  width: 100%; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-primary); transition: border-color 0.15s;
 }
 .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 </style>

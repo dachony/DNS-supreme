@@ -260,6 +260,25 @@ func (e *Engine) GetLists() []BlockList {
 	return result
 }
 
+// GetListDomains returns a sample of domains from a specific list (max 200)
+func (e *Engine) GetListDomains(listName string, max int) []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if max <= 0 || max > 200 {
+		max = 200
+	}
+	result := make([]string, 0, max)
+	for domain, entry := range e.domains {
+		if entry.listName == listName {
+			result = append(result, domain)
+			if len(result) >= max {
+				break
+			}
+		}
+	}
+	return result
+}
+
 func (e *Engine) AddList(name, url string, category Category) error {
 	if category == "" {
 		category = CategoryUncategorized

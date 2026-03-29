@@ -34,6 +34,7 @@ type QueryResult struct {
 }
 
 type FilterFunc func(domain string, qtype uint16) (blocked bool, rule string)
+type ResponseFilterFunc func(ip string) (blocked bool, reason string, category string)
 type LogFunc func(result *QueryResult)
 
 type Server struct {
@@ -50,11 +51,22 @@ type Server struct {
 	tlsConfig  *tls.Config
 	zoneLookup    ZoneLookupFunc
 	zoneDataFn    ZoneDataFunc
-	blockPageIP   net.IP
-	onBlock       func(domain, reason string)
-	hostnameCache map[string]string // IP -> hostname cache
-	hostnameMu    sync.RWMutex
-	mu            sync.RWMutex
+	blockPageIP      net.IP
+	onBlock          func(domain, reason string)
+	responseFilterFn ResponseFilterFunc
+	hostnameCache    map[string]string // IP -> hostname cache
+	hostnameMu       sync.RWMutex
+	mu               sync.RWMutex
+}
+
+func (s *Server) SetResponseFilter(fn ResponseFilterFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.responseFilterFn = fn
+}
+
+func (s *Server) FlushCache() {
+	s.cache.Flush()
 }
 
 func (s *Server) SetBlockPage(ip string, onBlock func(domain, reason string)) {
@@ -447,6 +459,50 @@ func (s *Server) processDNSMsg(r *dns.Msg, clientAddr string, protocol string) *
 	result.Latency = time.Since(start)
 	if len(resp.Answer) > 0 {
 		result.ResponseIP = extractIP(resp.Answer[0])
+	}
+
+	// Network protection: check destination IPs in the response
+	s.mu.RLock()
+	respFilter := s.responseFilterFn
+	bpIP := s.blockPageIP
+	onBlock := s.onBlock
+	s.mu.RUnlock()
+
+	if respFilter != nil && len(resp.Answer) > 0 {
+		for _, rr := range resp.Answer {
+			ansIP := extractIP(rr)
+			if ansIP == "" {
+				continue
+			}
+			if blocked, rule, _ := respFilter(ansIP); blocked {
+				result.Blocked = true
+				result.BlockRule = rule
+				result.Latency = time.Since(start)
+
+				msg := new(dns.Msg)
+				msg.SetReply(r)
+
+				if bpIP != nil && (qtype == dns.TypeA || qtype == dns.TypeAAAA) {
+					if qtype == dns.TypeA && bpIP.To4() != nil {
+						msg.Answer = append(msg.Answer, &dns.A{
+							Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+							A:   bpIP.To4(),
+						})
+					}
+					result.ResponseIP = bpIP.String()
+					if onBlock != nil {
+						onBlock(domain, rule)
+					}
+				} else {
+					msg.Rcode = dns.RcodeNameError
+				}
+
+				if s.logFn != nil {
+					s.logFn(result)
+				}
+				return msg
+			}
+		}
 	}
 
 	if resp.Rcode == dns.RcodeSuccess {

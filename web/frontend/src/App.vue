@@ -6,19 +6,22 @@
         <span class="version">v0.1.0</span>
       </div>
       <ul class="nav-links">
-        <li><router-link to="/" active-class="active" exact>Dashboard</router-link></li>
-        <li><router-link to="/zones" active-class="active">DNS Zones</router-link></li>
-        <li><router-link to="/blocklists" active-class="active">DNS Filtering</router-link></li>
-        <li><router-link to="/logs" active-class="active">Query Log</router-link></li>
-        <li><router-link to="/settings" active-class="active">Settings</router-link></li>
-        <li><router-link to="/users" active-class="active">Users</router-link></li>
+        <li><router-link to="/" active-class="active" exact><span class="nav-icon nav-icon-dashboard"></span>Dashboard</router-link></li>
+        <li><router-link to="/zones" active-class="active"><span class="nav-icon nav-icon-zones"></span>DNS Zones</router-link></li>
+        <li><router-link to="/blocklists" active-class="active"><span class="nav-icon nav-icon-filter"></span>DNS Filtering</router-link></li>
+        <li><router-link to="/logs" active-class="active"><span class="nav-icon nav-icon-logs"></span>Query Log</router-link></li>
+        <li><router-link to="/settings" active-class="active"><span class="nav-icon nav-icon-settings"></span>Settings</router-link></li>
       </ul>
       <div class="sidebar-bottom">
         <div class="status" v-if="status">
           <div class="status-dot" :class="{ online: status.status === 'running' }"></div>
-          <span>{{ status.total_domains?.toLocaleString() }} blocked domains</span>
+          <div class="status-text">
+            <span class="status-label">{{ status.status === 'running' ? 'Active' : 'Offline' }}</span>
+            <span class="status-count">{{ status.total_domains?.toLocaleString() }} blocked domains</span>
+          </div>
         </div>
         <button @click="toggleTheme" class="btn-theme" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
+          <span class="theme-icon">{{ isDark ? '\u2600' : '\u263E' }}</span>
           {{ isDark ? 'Light Mode' : 'Dark Mode' }}
         </button>
         <div class="user-info">
@@ -35,16 +38,53 @@
     </main>
   </div>
   <router-view v-else />
+
+  <!-- Global confirm modal -->
+  <div v-if="confirmDialog.visible" class="confirm-overlay" @click.self="confirmDialog.resolve(false); confirmDialog.visible = false">
+    <div class="confirm-modal">
+      <h3>{{ confirmDialog.title }}</h3>
+      <p>{{ confirmDialog.message }}</p>
+      <div class="confirm-actions">
+        <button @click="confirmDialog.resolve(false); confirmDialog.visible = false" class="confirm-btn cancel">Cancel</button>
+        <button @click="confirmDialog.resolve(true); confirmDialog.visible = false" class="confirm-btn" :class="confirmDialog.danger ? 'danger' : 'primary'">
+          {{ confirmDialog.confirmText || 'Confirm' }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, reactive, provide, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { isAuthenticated, currentUser, logout } from './auth'
 
 const router = useRouter()
 const status = ref<any>(null)
+
+// Global confirm dialog
+const confirmDialog = reactive({
+  visible: false,
+  title: '',
+  message: '',
+  confirmText: 'Confirm',
+  danger: false,
+  resolve: (_v: boolean) => {},
+})
+
+function showConfirm(opts: { title: string; message: string; confirmText?: string; danger?: boolean }): Promise<boolean> {
+  return new Promise((resolve) => {
+    confirmDialog.title = opts.title
+    confirmDialog.message = opts.message
+    confirmDialog.confirmText = opts.confirmText || 'Confirm'
+    confirmDialog.danger = opts.danger ?? true
+    confirmDialog.resolve = (v: boolean) => { confirmDialog.visible = false; resolve(v) }
+    confirmDialog.visible = true
+  })
+}
+
+provide('confirm', showConfirm)
 const isDark = ref(localStorage.getItem('theme') !== 'light')
 
 function toggleTheme() {
@@ -77,35 +117,43 @@ onMounted(() => { if (isAuthenticated.value) loadStatus() })
 
 <style>
 :root, [data-theme="dark"] {
-  --bg-body: #0f172a;
-  --bg-sidebar: #1e293b;
-  --bg-card: #1e293b;
+  --bg-body: #0c1222;
+  --bg-sidebar: #111827;
+  --bg-card: #1a2332;
   --bg-input: #0f172a;
-  --bg-hover: #334155;
-  --border: #334155;
+  --bg-hover: #293548;
+  --border: #1e3a5f;
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
   --text-dim: #475569;
-  --accent: #0ea5e9;
-  --accent-hover: #0284c7;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --accent-glow: rgba(56, 189, 248, 0.15);
   --brand: #38bdf8;
+  --brand-secondary: #818cf8;
+  --nav-active-bg: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(129, 140, 248, 0.08));
+  --sidebar-border: linear-gradient(to bottom, #1e3a5f 0%, rgba(56, 189, 248, 0.2) 50%, #1e3a5f 100%);
 }
 
 [data-theme="light"] {
-  --bg-body: #f1f5f9;
+  --bg-body: #f0f4f8;
   --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
-  --bg-input: #f8fafc;
-  --bg-hover: #e2e8f0;
-  --border: #e2e8f0;
+  --bg-input: #f5f8fb;
+  --bg-hover: #e8edf4;
+  --border: #d4dce8;
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --text-muted: #64748b;
   --text-dim: #94a3b8;
-  --accent: #0ea5e9;
-  --accent-hover: #0284c7;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --accent-glow: rgba(2, 132, 199, 0.1);
   --brand: #0284c7;
+  --brand-secondary: #6366f1;
+  --nav-active-bg: linear-gradient(135deg, rgba(2, 132, 199, 0.1), rgba(99, 102, 241, 0.05));
+  --sidebar-border: linear-gradient(to bottom, #d4dce8 0%, rgba(2, 132, 199, 0.2) 50%, #d4dce8 100%);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -121,60 +169,140 @@ body {
   width: 260px; min-width: 260px; height: 100vh;
   background: var(--bg-sidebar); padding: 24px 16px;
   display: flex; flex-direction: column;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid transparent;
+  border-image: var(--sidebar-border) 1;
   position: fixed; left: 0; top: 0; z-index: 10;
-  transition: background 0.2s, border-color 0.2s;
+  transition: background 0.2s;
 }
 
-.logo h1 { font-size: 1.3rem; color: var(--brand); font-weight: 700; letter-spacing: -0.5px; }
-.logo .version { font-size: 0.7rem; color: var(--text-dim); margin-left: 6px; }
+.logo {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 0 4px 20px; border-bottom: 1px solid var(--border);
+}
+.logo h1 {
+  font-size: 1.3rem; font-weight: 700; letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-secondary) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.logo .version { font-size: 0.68rem; color: var(--text-dim); }
 
-.nav-links { list-style: none; margin-top: 28px; flex: 1; }
+.nav-links { list-style: none; margin-top: 20px; flex: 1; }
 .nav-links li { margin-bottom: 2px; }
 .nav-links a {
-  display: block; padding: 10px 16px; color: var(--text-secondary);
-  text-decoration: none; border-radius: 8px; font-size: 0.9rem; transition: all 0.15s;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; color: var(--text-secondary);
+  text-decoration: none; border-radius: 8px; font-size: 0.88rem;
+  transition: all 0.15s; position: relative;
 }
 .nav-links a:hover { background: var(--bg-hover); color: var(--text-primary); }
-.nav-links a.active { background: var(--accent); color: #fff; }
+.nav-links a:hover .nav-icon { opacity: 1; }
+.nav-links a.active {
+  background: var(--nav-active-bg);
+  color: var(--accent);
+  border-left: 3px solid var(--accent);
+  padding-left: 11px;
+}
+.nav-links a.active .nav-icon { opacity: 1; }
+
+/* Nav icons as colored dots/indicators */
+.nav-icon {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  opacity: 0.5; transition: opacity 0.15s;
+}
+.nav-icon-dashboard { background: #38bdf8; }
+.nav-icon-zones { background: #a78bfa; }
+.nav-icon-filter { background: #f87171; }
+.nav-icon-logs { background: #34d399; }
+.nav-icon-settings { background: #fbbf24; }
+.nav-icon-users { background: #fb923c; }
 
 .sidebar-bottom { display: flex; flex-direction: column; gap: 8px; }
 
 .status {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; background: var(--bg-input); border-radius: 8px;
-  font-size: 0.78rem; color: var(--text-muted);
+  border: 1px solid var(--border);
 }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
-.status-dot.online { background: #22c55e; }
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #ef4444; flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+.status-dot.online {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+  animation: pulse-green 2s ease-in-out infinite;
+}
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2); }
+  50% { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.1); }
+}
+.status-text { display: flex; flex-direction: column; }
+.status-label { font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); }
+.status-count { font-size: 0.7rem; color: var(--text-muted); }
 
 .btn-theme {
   padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border);
   color: var(--text-secondary); border-radius: 8px; cursor: pointer; font-size: 0.8rem;
-  transition: all 0.15s;
+  transition: all 0.15s; display: flex; align-items: center; gap: 6px;
 }
 .btn-theme:hover { border-color: var(--accent); color: var(--accent); }
+.theme-icon { font-size: 1rem; }
 
 .user-info {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 12px; background: var(--bg-input); border-radius: 8px;
+  border: 1px solid var(--border);
 }
 .user-details { display: flex; flex-direction: column; }
 .user-name { color: var(--text-primary); font-size: 0.85rem; font-weight: 500; }
-.user-role { color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.user-role {
+  font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--brand-secondary);
+}
 
 .btn-logout {
   padding: 4px 12px; background: transparent; border: 1px solid var(--border);
   color: var(--text-muted); border-radius: 6px; cursor: pointer; font-size: 0.78rem;
+  transition: all 0.15s;
 }
-.btn-logout:hover { border-color: #ef4444; color: #ef4444; }
+.btn-logout:hover { border-color: #ef4444; color: #ef4444; background: rgba(239,68,68,0.08); }
 
 .content {
   flex: 1; margin-left: 260px; padding: 32px;
   height: 100vh; overflow-y: auto;
-  scrollbar-width: none; -ms-overflow-style: none;
 }
-.content::-webkit-scrollbar { display: none; }
+.content::-webkit-scrollbar { width: 6px; }
+.content::-webkit-scrollbar-track { background: transparent; }
+.content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.content::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+.content { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent) !important;
+  outline: none;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* Global theme overrides for child components */
 .section, .stat-card, .chart-card, .table-card, .policy-card, .zone-card,
@@ -218,6 +346,30 @@ table tbody tr { border-color: var(--border) !important; }
 table tbody tr:hover { background: var(--bg-hover) !important; }
 
 .mode-card.active { border-color: var(--accent) !important; }
+
+/* Confirm modal */
+.confirm-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex;
+  align-items: center; justify-content: center; z-index: 200;
+}
+.confirm-modal {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 24px; width: 400px; max-width: 90vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+}
+.confirm-modal h3 { color: var(--text-primary); font-size: 1.05rem; margin-bottom: 8px; }
+.confirm-modal p { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; margin-bottom: 20px; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.confirm-btn {
+  padding: 8px 20px; border: none; border-radius: 8px; cursor: pointer;
+  font-size: 0.88rem; font-weight: 500; transition: all 0.15s;
+}
+.confirm-btn.cancel { background: var(--bg-hover); color: var(--text-secondary); }
+.confirm-btn.cancel:hover { color: var(--text-primary); }
+.confirm-btn.danger { background: #ef4444; color: #fff; }
+.confirm-btn.danger:hover { background: #dc2626; }
+.confirm-btn.primary { background: var(--accent); color: #fff; }
+.confirm-btn.primary:hover { background: var(--accent-hover); }
 
 .login-page { background: var(--bg-body) !important; }
 .login-card { background: var(--bg-card) !important; border-color: var(--border) !important; }

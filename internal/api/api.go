@@ -17,31 +17,35 @@ import (
 )
 
 type Server struct {
-	cfg       config.APIConfig
-	db        *db.Database
-	filter    *filter.Engine
-	blockPage *blockpage.Server
-	policies  *filter.PolicyManager
-	dns       *dnsserver.Server
-	dnssec    *dnsserver.DNSSECManager
-	router    *gin.Engine
+	cfg        config.APIConfig
+	db         *db.Database
+	filter     *filter.Engine
+	netProtect *filter.NetProtectEngine
+	blockPage  *blockpage.Server
+	policies   *filter.PolicyManager
+	dns        *dnsserver.Server
+	dnssec     *dnsserver.DNSSECManager
+	fail2ban   *Fail2Ban
+	router     *gin.Engine
 }
 
-func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter.Engine, bp *blockpage.Server, dnsServer *dnsserver.Server) *Server {
+func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter.Engine, netProtect *filter.NetProtectEngine, bp *blockpage.Server, dnsServer *dnsserver.Server) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(cors.Default())
 
 	s := &Server{
-		cfg:       cfg,
-		db:        database,
-		filter:    filterEngine,
-		blockPage: bp,
-		policies:  filter.NewPolicyManager(),
-		dns:       dnsServer,
-		dnssec:    dnsserver.NewDNSSECManager(),
-		router:    router,
+		cfg:        cfg,
+		db:         database,
+		filter:     filterEngine,
+		netProtect: netProtect,
+		blockPage:  bp,
+		policies:   filter.NewPolicyManager(),
+		dns:        dnsServer,
+		fail2ban:   NewFail2Ban(),
+		dnssec:     dnsserver.NewDNSSECManager(),
+		router:     router,
 	}
 
 	s.ensureDefaultAdmin()
@@ -95,6 +99,7 @@ func (s *Server) setupRoutes() {
 		protected.GET("/blocklists", s.getBlocklists)
 		protected.POST("/blocklists", s.addBlocklist)
 		protected.DELETE("/blocklists/:name", s.removeBlocklist)
+		protected.GET("/blocklists/:name/domains", s.getBlocklistDomains)
 
 		// Custom blocks
 		protected.GET("/custom-blocks", s.getCustomBlocks)
@@ -114,6 +119,21 @@ func (s *Server) setupRoutes() {
 		protected.GET("/geo-blocked", s.getGeoBlocked)
 		protected.PUT("/geo-blocked", s.setGeoBlocked)
 
+		// Network protection
+		// Fail2ban & access control
+		protected.GET("/fail2ban", s.getFail2BanStatus)
+		protected.PUT("/fail2ban/settings", s.setFail2BanSettings)
+		protected.DELETE("/fail2ban/unban/:ip", s.unbanIP)
+		protected.PUT("/fail2ban/allowed-ips", s.setAllowedIPs)
+
+		protected.GET("/network-protection", s.getNetProtectCategories)
+		protected.PUT("/network-protection/:id", s.setNetProtectCategory)
+		protected.GET("/network-protection/geo", s.getNetProtectGeo)
+		protected.PUT("/network-protection/geo", s.setNetProtectGeo)
+		protected.POST("/network-protection/refresh", s.refreshNetProtect)
+		protected.GET("/network-protection/settings", s.getNetProtectSettings)
+		protected.PUT("/network-protection/settings", s.setNetProtectSettings)
+
 		// Zones
 		s.setupZoneRoutes(protected)
 
@@ -126,6 +146,8 @@ func (s *Server) setupRoutes() {
 		protected.PUT("/settings/server", s.updateServerSettings)
 		protected.GET("/settings/hostname", s.getHostname)
 		protected.PUT("/settings/hostname", s.setHostname)
+		protected.GET("/settings/primary-domain", s.getPrimaryDomain)
+		protected.PUT("/settings/primary-domain", s.setPrimaryDomain)
 		protected.GET("/settings/cluster", s.getCluster)
 		protected.PUT("/settings/cluster", s.setCluster)
 		protected.GET("/settings/filtering-mode", s.getFilteringMode)
@@ -135,6 +157,7 @@ func (s *Server) setupRoutes() {
 		protected.GET("/certs", s.getCerts)
 		protected.POST("/certs/generate", s.generateSelfSigned)
 		protected.POST("/certs/upload", s.uploadCert)
+		protected.GET("/certs/export", s.exportCert)
 
 		// DNSSEC
 		s.setupDNSSECRoutes(protected)
@@ -181,6 +204,20 @@ type loginReq struct {
 }
 
 func (s *Server) login(c *gin.Context) {
+	clientIP := c.ClientIP()
+
+	// Fail2ban: check if IP is banned
+	if s.fail2ban.IsBanned(clientIP) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many failed attempts. Your IP is temporarily blocked."})
+		return
+	}
+
+	// Access control: check if IP is allowed
+	if !s.fail2ban.IsAllowed(clientIP) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied from this IP address"})
+		return
+	}
+
 	var req loginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -189,14 +226,18 @@ func (s *Server) login(c *gin.Context) {
 
 	user, err := s.db.GetUserByUsername(req.Username)
 	if err != nil || user == nil {
+		s.fail2ban.RecordFail(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 
 	if !auth.CheckPassword(user.PasswordHash, req.Password) {
+		s.fail2ban.RecordFail(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
+
+	s.fail2ban.RecordSuccess(clientIP)
 
 	// If MFA is enabled, return partial token (mfaDone=false)
 	mfaDone := !user.MFAEnabled
@@ -582,6 +623,12 @@ func (s *Server) removeBlocklist(c *gin.Context) {
 	name := c.Param("name")
 	s.filter.RemoveList(name)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) getBlocklistDomains(c *gin.Context) {
+	name := c.Param("name")
+	domains := s.filter.GetListDomains(name, 200)
+	c.JSON(http.StatusOK, gin.H{"name": name, "domains": domains, "sample_size": len(domains)})
 }
 
 func (s *Server) getCustomBlocks(c *gin.Context) {

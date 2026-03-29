@@ -65,6 +65,12 @@ func (c *Cache) Size() int {
 	return len(c.entries)
 }
 
+func (c *Cache) Flush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string]*cacheEntry)
+}
+
 func (c *Cache) evictOldest() {
 	var oldestKey string
 	var oldestTime time.Time

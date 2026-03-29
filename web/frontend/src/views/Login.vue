@@ -86,39 +86,54 @@ async function handleMFA() {
 .login-page {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   background: var(--bg-body);
+  position: relative;
+}
+.login-page::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(56, 189, 248, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(129, 140, 248, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 80%, rgba(52, 211, 153, 0.04) 0%, transparent 50%);
 }
 .login-card {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
-  padding: 40px; width: 400px; max-width: 90vw;
+  padding: 40px; width: 400px; max-width: 90vw; position: relative; z-index: 1;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
 }
-.login-card h1 { color: #38bdf8; font-size: 1.8rem; margin-bottom: 4px; }
-.subtitle { color: #64748b; font-size: 0.9rem; margin-bottom: 24px; }
+.login-card h1 {
+  font-size: 1.8rem; margin-bottom: 4px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-secondary, #818cf8));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.subtitle { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 24px; }
 
 .field { margin-bottom: 16px; }
-.field label { display: block; color: #94a3b8; font-size: 0.85rem; margin-bottom: 6px; }
+.field label { display: block; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 6px; }
 .field input {
-  width: 100%; padding: 10px 14px; background: #0f172a; border: 1px solid #334155;
-  border-radius: 8px; color: #e2e8f0; font-size: 1rem;
+  width: 100%; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text-primary); font-size: 1rem; transition: border-color 0.15s;
 }
-.field input::placeholder { color: #475569; }
-.field input:focus { outline: none; border-color: #0ea5e9; }
+.field input::placeholder { color: var(--text-dim); }
 
 .btn-login {
-  width: 100%; padding: 12px; background: #0ea5e9; color: #fff; border: none;
-  border-radius: 8px; font-size: 1rem; cursor: pointer; margin-top: 8px;
+  width: 100%; padding: 12px; background: linear-gradient(135deg, var(--accent), var(--brand-secondary, #818cf8)); color: #fff; border: none;
+  border-radius: 8px; font-size: 1rem; cursor: pointer; margin-top: 8px; transition: all 0.2s; font-weight: 500;
 }
-.btn-login:hover { background: #0284c7; }
+.btn-login:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(56,189,248,0.3); }
 .btn-login:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-back {
-  width: 100%; padding: 10px; background: transparent; color: #64748b;
-  border: 1px solid #334155; border-radius: 8px; cursor: pointer; margin-top: 8px;
+  width: 100%; padding: 10px; background: transparent; color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer; margin-top: 8px;
+  transition: border-color 0.15s, color 0.15s;
 }
+.btn-back:hover { border-color: var(--text-secondary); color: var(--text-secondary); }
 
 .error-msg {
   background: rgba(239,68,68,0.1); border: 1px solid #ef4444; color: #ef4444;
   padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem;
 }
 
-.mfa-info { color: #94a3b8; font-size: 0.9rem; margin-bottom: 16px; }
+.mfa-info { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px; }
 </style>

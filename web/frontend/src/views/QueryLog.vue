@@ -233,7 +233,7 @@ async function loadLogs() {
     logs.value = data.data || []
     total.value = data.total || 0
   } catch (e) {
-    console.error('Failed to load logs', e)
+    // Log load failed silently — auto-refresh will retry
   } finally {
     loading.value = false
   }
@@ -404,8 +404,9 @@ onUnmounted(() => {
 .filters input::placeholder { color: var(--text-dim); }
 .btn-refresh {
   padding: 8px 20px; background: var(--accent); color: #fff; border: none;
-  border-radius: 8px; cursor: pointer; font-size: 0.9rem;
+  border-radius: 8px; cursor: pointer; font-size: 0.9rem; transition: background 0.15s;
 }
+.btn-refresh:hover { background: var(--accent-hover); }
 
 .log-table { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
@@ -416,7 +417,7 @@ thead th {
 tbody tr { border-bottom: 1px solid var(--border); }
 tbody tr.clickable-row { cursor: pointer; }
 tbody tr:hover { background: var(--bg-hover); }
-tbody tr.blocked { background: rgba(239,68,68,0.04); }
+tbody tr.blocked { background: rgba(239,68,68,0.04); border-left: 2px solid rgba(239,68,68,0.4); }
 td { padding: 8px; font-size: 0.85rem; }
 .time { color: var(--text-muted); white-space: nowrap; }
 .domain { color: var(--text-primary); word-break: break-all; max-width: 300px; }
@@ -434,8 +435,9 @@ td { padding: 8px; font-size: 0.85rem; }
 }
 .pagination button {
   padding: 6px 16px; background: var(--bg-card); border: 1px solid var(--border);
-  color: var(--text-secondary); border-radius: 6px; cursor: pointer;
+  color: var(--text-secondary); border-radius: 6px; cursor: pointer; transition: all 0.15s;
 }
+.pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
 .pagination span { color: var(--text-muted); font-size: 0.85rem; }
 
@@ -465,7 +467,7 @@ td { padding: 8px; font-size: 0.85rem; }
 .modal-detail {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
   padding: 28px; width: 640px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-width: none; box-shadow: 0 16px 48px rgba(0,0,0,0.3);
 }
 .modal-detail::-webkit-scrollbar { display: none; }
 
@@ -503,13 +505,19 @@ td { padding: 8px; font-size: 0.85rem; }
 .btn-allow {
   padding: 8px 16px; background: rgba(34,197,94,0.15); color: #22c55e;
   border: 1px solid rgba(34,197,94,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+  transition: background 0.15s;
 }
+.btn-allow:hover { background: rgba(34,197,94,0.25); }
 .btn-block {
   padding: 8px 16px; background: rgba(239,68,68,0.15); color: #ef4444;
   border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+  transition: background 0.15s;
 }
+.btn-block:hover { background: rgba(239,68,68,0.25); }
 .btn-filter {
   padding: 8px 16px; background: var(--bg-input); color: var(--text-secondary);
   border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+  transition: all 0.15s;
 }
+.btn-filter:hover { border-color: var(--text-dim); color: var(--text-primary); }
 </style>
