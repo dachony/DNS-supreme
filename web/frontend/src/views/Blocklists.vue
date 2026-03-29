@@ -40,7 +40,7 @@
 
           <div class="services-section">
             <h3>Country Blocking</h3>
-            <div class="svc-item master" :class="{ disabled: !geoEnabled }" @click="geoEnabled = !geoEnabled">
+            <div class="svc-item master" :class="{ disabled: !geoEnabled }" @click="activeTab = 'netprotect'">
               <span class="svc-icon svc-icon-geo">GEO</span>
               <div class="svc-info">
                 <span class="svc-name">Country Blocking</span>
@@ -412,8 +412,8 @@ const tabs = [
   { id: 'netprotect', label: 'Network Protection' },
 ]
 
-const npEnabled = ref(false)
-const geoEnabled = ref(false)
+const npEnabled = computed(() => npCategories.value.some(c => c.enabled))
+const geoEnabled = computed(() => geoBlocked.value.length > 0)
 const npRefreshMinutes = ref(360)
 const npRefreshing = ref(false)
 
@@ -436,14 +436,14 @@ async function loadNpSettings() {
   } catch {}
 }
 
-function toggleNpMaster() {
-  npEnabled.value = !npEnabled.value
-  // Enable/disable all NP categories at once
+async function toggleNpMaster() {
+  const newState = !npEnabled.value
   for (const cat of npCategories.value) {
-    if (cat.enabled !== npEnabled.value) {
-      toggleNpCategory(cat)
+    if (cat.enabled !== newState) {
+      await axios.put(`/api/network-protection/${cat.id}`, { enabled: newState })
     }
   }
+  loadNpCategories()
 }
 
 const prioritySteps = [
