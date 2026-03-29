@@ -85,6 +85,26 @@
       </div>
     </div>
 
+    <!-- Security & Protection Status -->
+    <div class="protection-bar" v-if="serverStatus">
+      <div class="prot-item">
+        <span class="prot-label">Blocklists</span>
+        <span class="prot-value">{{ serverStatus.total_lists }} lists &middot; {{ serverStatus.total_domains?.toLocaleString() }} domains</span>
+      </div>
+      <div class="prot-item">
+        <span class="prot-label">Network Protection</span>
+        <span class="prot-value" :class="serverStatus.np_active_feeds > 0 ? 'active' : 'inactive'">{{ serverStatus.np_active_feeds }} feeds active</span>
+      </div>
+      <div class="prot-item">
+        <span class="prot-label">Geo-Blocking</span>
+        <span class="prot-value" :class="serverStatus.geo_blocked_countries > 0 ? 'active' : 'inactive'">{{ serverStatus.geo_blocked_countries }} countries</span>
+      </div>
+      <div class="prot-item">
+        <span class="prot-label">Fail2Ban</span>
+        <span class="prot-value" :class="serverStatus.banned_ips > 0 ? 'warn' : 'active'">{{ serverStatus.banned_ips }} banned IPs</span>
+      </div>
+    </div>
+
     <div class="charts-row" v-if="stats">
       <div class="chart-card wide">
         <h3>Queries Over Time</h3>
@@ -141,6 +161,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 const stats = ref<any>(null)
 const sysMetrics = ref<any>(null)
+const serverStatus = ref<any>(null)
 const hours = ref(24)
 const loading = ref(false)
 const refreshInterval = ref(5)
@@ -211,12 +232,14 @@ async function loadStats(h: number) {
   const isFirstLoad = !stats.value
   if (isFirstLoad) loading.value = true
   try {
-    const [statsResp, metricsResp] = await Promise.all([
+    const [statsResp, metricsResp, statusResp] = await Promise.all([
       axios.get(`/api/stats?hours=${h}`),
       axios.get('/api/system-metrics'),
+      axios.get('/api/status'),
     ])
     stats.value = statsResp.data
     sysMetrics.value = metricsResp.data
+    serverStatus.value = statusResp.data
   } catch (e) {
     // Stats load failed silently — auto-refresh will retry
   } finally {
@@ -311,6 +334,21 @@ onUnmounted(() => {
 .stat-card.blocked .stat-value { color: #f87171; }
 .stat-card.allowed .stat-value { color: #34d399; }
 .stat-card.percent .stat-value { color: #fbbf24; }
+
+/* Protection status bar */
+.protection-bar {
+  display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap;
+}
+.prot-item {
+  flex: 1; min-width: 160px; padding: 10px 16px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.prot-label { color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.prot-value { color: var(--text-primary); font-size: 0.88rem; font-weight: 500; }
+.prot-value.active { color: #22c55e; }
+.prot-value.inactive { color: var(--text-dim); }
+.prot-value.warn { color: #f59e0b; }
 
 /* Chart */
 .charts-row { margin-bottom: 24px; }

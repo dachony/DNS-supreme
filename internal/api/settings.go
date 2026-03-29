@@ -15,6 +15,10 @@ func (s *Server) getBlockPageTemplate(c *gin.Context) {
 	if s.blockPage != nil {
 		html = s.blockPage.GetCustomTemplate()
 	}
+	// Try DB if in-memory is empty
+	if html == "" {
+		html = s.db.GetSetting("block_page_html")
+	}
 	c.JSON(http.StatusOK, gin.H{"html": html})
 }
 
@@ -32,5 +36,12 @@ func (s *Server) setBlockPageTemplate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	s.db.SetSetting("block_page_html", req.HTML)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) LoadBlockPageTemplate() {
+	if html := s.db.GetSetting("block_page_html"); html != "" && s.blockPage != nil {
+		s.blockPage.SetCustomTemplate(html)
+	}
 }

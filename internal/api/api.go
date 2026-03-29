@@ -58,6 +58,8 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 	s.ensureDefaultAdmin()
 	s.LoadMailConfig()
 	s.LoadFail2BanConfig()
+	s.LoadPolicies()
+	s.LoadBlockPageTemplate()
 	s.getClusterFromDB()
 	s.setupRoutes()
 	return s
@@ -90,6 +92,14 @@ func (s *Server) setupRoutes() {
 	})
 
 	api := s.router.Group("/api")
+
+	// Health check (no auth required)
+	api.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "healthy",
+			"version": "0.1.0",
+		})
+	})
 
 	// Public auth endpoints
 	api.POST("/auth/login", s.login)
@@ -771,11 +781,32 @@ func (s *Server) persistAllowlist() {
 
 func (s *Server) getStatus(c *gin.Context) {
 	totalDomains, totalLists := s.filter.Stats()
+	npCats := 0
+	if s.netProtect != nil {
+		for _, cat := range s.netProtect.GetCategories() {
+			if cat.Enabled {
+				npCats++
+			}
+		}
+	}
+	geoCodes := 0
+	if s.netProtect != nil {
+		geoCodes = len(s.netProtect.GetGeoBlocked())
+	}
+	bannedIPs := 0
+	if s.fail2ban != nil {
+		bannedIPs = len(s.fail2ban.GetBannedIPs())
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"status":        "running",
-		"version":       "0.1.0",
-		"total_domains": totalDomains,
-		"total_lists":   totalLists,
+		"status":                "running",
+		"version":               "0.1.0",
+		"total_domains":         totalDomains,
+		"total_lists":           totalLists,
+		"np_active_feeds":       npCats,
+		"geo_blocked_countries": geoCodes,
+		"banned_ips":            bannedIPs,
+		"users":                 s.db.UserCount(),
+		"smtp_configured":       s.mailer.IsConfigured(),
 	})
 }
 

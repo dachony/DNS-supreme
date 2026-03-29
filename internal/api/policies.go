@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/dachony/dns-supreme/internal/filter"
@@ -36,6 +37,7 @@ func (s *Server) createPolicy(c *gin.Context) {
 		return
 	}
 	s.policies.SetPolicy(&p)
+	s.persistPolicies()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -52,5 +54,24 @@ func (s *Server) getPolicy(c *gin.Context) {
 func (s *Server) deletePolicy(c *gin.Context) {
 	ip := c.Param("ip")
 	s.policies.RemovePolicy(ip)
+	s.persistPolicies()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) persistPolicies() {
+	policies := s.policies.ListPolicies()
+	if data, err := json.Marshal(policies); err == nil {
+		s.db.SetSetting("device_policies", string(data))
+	}
+}
+
+func (s *Server) LoadPolicies() {
+	if data := s.db.GetSetting("device_policies"); data != "" {
+		var policies []*filter.DevicePolicy
+		if json.Unmarshal([]byte(data), &policies) == nil {
+			for _, p := range policies {
+				s.policies.SetPolicy(p)
+			}
+		}
+	}
 }
