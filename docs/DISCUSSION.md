@@ -1,36 +1,64 @@
-# DNS-supreme — Diskusija i otvorena pitanja
+# DNS-supreme — Diskusija i razvoj
 
-## Zaključene diskusije
+## Verzije
 
-### 2026-03-29 — Tech Stack
-**Odlučeno:**
-- **Backend:** Go
-- **Frontend:** Vue 3 + Vite + TypeScript
-- **UI kit:** TBD (Naive UI ili PrimeVue — odlučujemo kad krenemo sa UI)
-- **Baza:** PostgreSQL
-- **Deploy:** Docker-first, standalone later
-
-**Razlozi:**
-- Go — dokazan za DNS (CoreDNS), single binary, mali footprint, odličan networking
-- Vue — čistiji za admin dashboard, manji bundle, manje boilerplate-a, AdGuard Home ga koristi
+### v1.0.0 — 2026-03-29
+Prva production verzija. Sve faze (1-4) implementirane u jednom danu.
 
 ---
 
-## Otvorena pitanja
+## Tech Stack (Zaključeno)
+- **Backend:** Go 1.23
+- **Frontend:** Vue 3 + Vite + TypeScript (bez UI kit-a, custom CSS variables)
+- **Baza:** PostgreSQL 16
+- **Deploy:** Docker Compose
+- **DNS biblioteka:** miekg/dns
+- **GeoIP:** DB-IP free (auto-download)
+- **ACME:** golang.org/x/crypto/acme
 
-### 1. MVP scope / faziranje
-Predlog faza:
-- **Faza 1:** DNS engine (UDP/TCP) + forwarderi + basic blockliste + query log + minimalan web UI + Docker compose
-- **Faza 2:** DoT, DoH, DoQ + kategorije blocklista + geo-blocking + pretraga logova + statistike
-- **Faza 3:** Autoritativni DNS + zone management + primary/secondary cluster + DNSSEC
-- **Faza 4:** Block page + sertifikati (self-signed, Let's Encrypt) + per-device politike + multi-user auth + standalone binary
+## Implementirane faze
 
-Da li je ovaj redosled OK?
+### Faza 1 (DNS engine)
+- DNS server (UDP/TCP) sa forwarderima
+- Steven Black hosts blocklist kao default
+- Query log u PostgreSQL sa batch insert-om
+- Web UI sa Vue 3
+- Docker Compose deployment
 
-### 2. UI kit
-Naive UI vs PrimeVue — odlučujemo kad krenemo sa frontend-om.
+### Faza 2 (Encrypcija + filtering)
+- DNS-over-TLS (port 853)
+- DNS-over-HTTPS (port 8443)
+- DNS-over-QUIC (port 8853)
+- 22+ community blocklist katalog (Hagezi, OISD, Steven Black, 1Hosts, AdGuard, itd.)
+- Premium feed podrška (Kaspersky, Palo Alto, CrowdStrike, Fortinet, abuse.ch, itd.)
+- Kategorije sa toggle-ovima (Ads, Malware, Adult, Social, Gambling, Tracking)
+- GeoIP country blocking sa searchable picker-om
+- Network Protection (Tor, Spamhaus DROP, Botnet C2, Malicious IPs, URLhaus)
+- Query log pretraga i statistike
+- Dashboard sa real-time chartovima
 
-### 3. Go DNS biblioteka
-Kandidati:
-- `miekg/dns` (github.com/miekg/dns) — de facto standard, koristi ga CoreDNS
-- Custom implementacija — samo ako miekg ne pokrije sve potrebe
+### Faza 3 (Autoritativni DNS)
+- Zone management (forward + reverse)
+- Record editor (A, AAAA, CNAME, MX, TXT, NS, SRV, PTR, CAA)
+- DNSSEC signing per-zone
+- Primary/secondary cluster konfiguracija
+- Primary domain koncept sa auto-zone kreacijom
+
+### Faza 4 (Security + production)
+- Block page sa visual builder-om i live preview
+- Self-signed i ACME/Let's Encrypt certifikati
+- Per-zone certifikati
+- Certificate export za distribuciju klijentima
+- Per-device filtering policies
+- Multi-user auth sa roles (admin/viewer)
+- TOTP i Email MFA
+- Fail2Ban sa IP banning-om
+- IP access control za management panel
+- SMTP mailer sa security alert notifikacijama
+- Kompletna persistence u PostgreSQL
+- Graceful restart (SIGHUP) za TLS reload
+- Health check endpoint
+
+## Arhitektura
+
+Videti `docs/ARCHITECTURE.md` za detalje.
