@@ -1,0 +1,285 @@
+package certs
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
+	"log"
+	"math/big"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"golang.org/x/crypto/acme"
+)
+
+// ACMEConfig holds ACME/Let's Encrypt configuration
+type ACMEConfig struct {
+	Provider  string `json:"provider"`  // "letsencrypt", "letsencrypt-staging", "zerossl", "custom"
+	Email     string `json:"email"`
+	URL       string `json:"url"`       // custom ACME directory URL
+	Challenge string `json:"challenge"` // "dns-01" or "http-01"
+}
+
+// ACMEClient handles certificate requests via ACME protocol
+type ACMEClient struct {
+	cfg        ACMEConfig
+	certDir    string
+	dnsSetFunc func(fqdn, value string) error // function to set DNS TXT record for dns-01
+	dnsClearFunc func(fqdn string) error       // function to clear DNS TXT record
+	mu         sync.Mutex
+}
+
+func NewACMEClient(certDir string) *ACMEClient {
+	return &ACMEClient{
+		certDir: certDir,
+		cfg: ACMEConfig{
+			Provider:  "letsencrypt",
+			Challenge: "dns-01",
+		},
+	}
+}
+
+func (a *ACMEClient) GetConfig() ACMEConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cfg
+}
+
+func (a *ACMEClient) SetConfig(cfg ACMEConfig) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg = cfg
+}
+
+// SetDNSSolver sets the functions used to create/remove DNS TXT records for dns-01 challenges
+func (a *ACMEClient) SetDNSSolver(setFn func(fqdn, value string) error, clearFn func(fqdn string) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dnsSetFunc = setFn
+	a.dnsClearFunc = clearFn
+}
+
+func (a *ACMEClient) directoryURL() string {
+	switch a.cfg.Provider {
+	case "letsencrypt":
+		return "https://acme-v02.api.letsencrypt.org/directory"
+	case "letsencrypt-staging":
+		return "https://acme-staging-v02.api.letsencrypt.org/directory"
+	case "zerossl":
+		return "https://acme.zerossl.com/v2/DV90"
+	case "custom":
+		return a.cfg.URL
+	default:
+		return "https://acme-v02.api.letsencrypt.org/directory"
+	}
+}
+
+// RequestCertificate requests a certificate for the given domain via ACME
+func (a *ACMEClient) RequestCertificate(domain string) error {
+	a.mu.Lock()
+	cfg := a.cfg
+	dnsSet := a.dnsSetFunc
+	dnsClear := a.dnsClearFunc
+	a.mu.Unlock()
+
+	if cfg.Email == "" {
+		return fmt.Errorf("ACME email not configured")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Generate account key
+	accountKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate account key: %w", err)
+	}
+
+	client := &acme.Client{
+		Key:          accountKey,
+		DirectoryURL: a.directoryURL(),
+	}
+
+	// Register account
+	acct := &acme.Account{Contact: []string{"mailto:" + cfg.Email}}
+	if _, err := client.Register(ctx, acct, acme.AcceptTOS); err != nil {
+		// Already registered is OK
+		log.Printf("[ACME] Account registration: %v (may already exist)", err)
+	}
+
+	// Create order
+	order, err := client.AuthorizeOrder(ctx, acme.DomainIDs(domain))
+	if err != nil {
+		return fmt.Errorf("authorize order: %w", err)
+	}
+
+	// Process authorizations
+	for _, authzURL := range order.AuthzURLs {
+		authz, err := client.GetAuthorization(ctx, authzURL)
+		if err != nil {
+			return fmt.Errorf("get authorization: %w", err)
+		}
+
+		if authz.Status == acme.StatusValid {
+			continue
+		}
+
+		// Find challenge
+		var challenge *acme.Challenge
+		for _, ch := range authz.Challenges {
+			if cfg.Challenge == "dns-01" && ch.Type == "dns-01" {
+				challenge = ch
+				break
+			}
+			if cfg.Challenge == "http-01" && ch.Type == "http-01" {
+				challenge = ch
+				break
+			}
+		}
+		if challenge == nil {
+			return fmt.Errorf("no %s challenge available", cfg.Challenge)
+		}
+
+		// Solve challenge
+		if challenge.Type == "dns-01" {
+			if dnsSet == nil {
+				return fmt.Errorf("DNS solver not configured")
+			}
+			// Get the TXT record value
+			txtValue, err := client.DNS01ChallengeRecord(challenge.Token)
+			if err != nil {
+				return fmt.Errorf("dns01 record: %w", err)
+			}
+			fqdn := "_acme-challenge." + domain
+			if err := dnsSet(fqdn, txtValue); err != nil {
+				return fmt.Errorf("set DNS TXT: %w", err)
+			}
+			defer func() {
+				if dnsClear != nil {
+					dnsClear(fqdn)
+				}
+			}()
+			// Wait for propagation
+			time.Sleep(5 * time.Second)
+		}
+
+		// Accept challenge
+		if _, err := client.Accept(ctx, challenge); err != nil {
+			return fmt.Errorf("accept challenge: %w", err)
+		}
+
+		// Wait for authorization
+		if _, err := client.WaitAuthorization(ctx, authzURL); err != nil {
+			return fmt.Errorf("wait authorization: %w", err)
+		}
+	}
+
+	// Generate certificate key
+	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate cert key: %w", err)
+	}
+
+	// Create CSR
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: domain},
+		DNSNames: []string{domain, "*." + domain},
+	}, certKey)
+	if err != nil {
+		return fmt.Errorf("create CSR: %w", err)
+	}
+
+	// Finalize order
+	derCerts, _, err := client.CreateOrderCert(ctx, order.FinalizeURL, csr, true)
+	if err != nil {
+		return fmt.Errorf("create cert: %w", err)
+	}
+
+	// Save certificate chain
+	os.MkdirAll(a.certDir, 0755)
+	certPath := filepath.Join(a.certDir, domain+".crt")
+	keyPath := filepath.Join(a.certDir, domain+".key")
+
+	certFile, err := os.Create(certPath)
+	if err != nil {
+		return err
+	}
+	for _, der := range derCerts {
+		pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: der})
+	}
+	certFile.Close()
+
+	keyDER, _ := x509.MarshalECPrivateKey(certKey)
+	keyFile, err := os.Create(keyPath)
+	if err != nil {
+		return err
+	}
+	pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	keyFile.Close()
+
+	// Also copy as server cert if it's the primary
+	serverCert := filepath.Join(a.certDir, "server.crt")
+	serverKey := filepath.Join(a.certDir, "server.key")
+	copyFile(certPath, serverCert)
+	copyFile(keyPath, serverKey)
+
+	log.Printf("[ACME] Certificate obtained for %s, saved to %s", domain, certPath)
+	return nil
+}
+
+// GenerateSelfSignedForDomain creates a self-signed cert for a specific domain
+func GenerateSelfSignedForDomain(domain, certDir string) error {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+
+	serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject:      pkix.Name{CommonName: domain, Organization: []string{"DNS Supreme"}},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{domain, "*." + domain},
+		IsCA:         true,
+		BasicConstraintsValid: true,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return err
+	}
+
+	os.MkdirAll(certDir, 0755)
+	certPath := filepath.Join(certDir, domain+".crt")
+	keyPath := filepath.Join(certDir, domain+".key")
+
+	certFile, _ := os.Create(certPath)
+	pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	certFile.Close()
+
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	keyFile, _ := os.Create(keyPath)
+	pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	keyFile.Close()
+
+	log.Printf("[Certs] Self-signed certificate generated for %s", domain)
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0644)
+}

@@ -20,10 +20,17 @@
             <span class="status-count">{{ status.total_domains?.toLocaleString() }} blocked domains</span>
           </div>
         </div>
-        <button @click="toggleTheme" class="btn-theme" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
-          <span class="theme-icon">{{ isDark ? '\u2600' : '\u263E' }}</span>
-          {{ isDark ? 'Light Mode' : 'Dark Mode' }}
-        </button>
+        <div class="sidebar-controls">
+          <button @click="toggleTheme" class="btn-theme" :title="isDark ? 'Light' : 'Dark'">
+            <span class="theme-icon">{{ isDark ? '\u2600' : '\u263E' }}</span>
+            {{ isDark ? 'Light' : 'Dark' }}
+          </button>
+          <div class="zoom-controls">
+            <button @click="zoomOut" class="btn-zoom" :disabled="zoomLevel <= 60" title="Zoom out">-</button>
+            <span class="zoom-level">{{ zoomLevel }}%</span>
+            <button @click="zoomIn" class="btn-zoom" :disabled="zoomLevel >= 140" title="Zoom in">+</button>
+          </div>
+        </div>
         <div class="user-info">
           <div class="user-details">
             <span class="user-name">{{ currentUser?.first_name || currentUser?.username }}</span>
@@ -86,6 +93,25 @@ function showConfirm(opts: { title: string; message: string; confirmText?: strin
 
 provide('confirm', showConfirm)
 const isDark = ref(localStorage.getItem('theme') !== 'light')
+const zoomLevel = ref(parseInt(localStorage.getItem('zoom') || '100'))
+
+function zoomIn() {
+  if (zoomLevel.value < 140) {
+    zoomLevel.value += 5
+    applyZoom()
+  }
+}
+function zoomOut() {
+  if (zoomLevel.value > 60) {
+    zoomLevel.value -= 5
+    applyZoom()
+  }
+}
+function applyZoom() {
+  document.documentElement.style.fontSize = (zoomLevel.value / 100 * 16) + 'px'
+  localStorage.setItem('zoom', String(zoomLevel.value))
+}
+applyZoom()
 
 function toggleTheme() {
   isDark.value = !isDark.value
@@ -241,13 +267,33 @@ body {
 .status-label { font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); }
 .status-count { font-size: 0.7rem; color: var(--text-muted); }
 
+.sidebar-controls {
+  display: flex; gap: 6px; align-items: center;
+}
 .btn-theme {
-  padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border);
-  color: var(--text-secondary); border-radius: 8px; cursor: pointer; font-size: 0.8rem;
-  transition: all 0.15s; display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; background: var(--bg-input); border: 1px solid var(--border);
+  color: var(--text-secondary); border-radius: 8px; cursor: pointer; font-size: 0.78rem;
+  transition: all 0.15s; display: flex; align-items: center; gap: 4px; flex: 1;
 }
 .btn-theme:hover { border-color: var(--accent); color: var(--accent); }
-.theme-icon { font-size: 1rem; }
+.theme-icon { font-size: 0.9rem; }
+
+.zoom-controls {
+  display: flex; align-items: center; gap: 0;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden;
+}
+.btn-zoom {
+  padding: 6px 10px; background: transparent; border: none;
+  color: var(--text-secondary); cursor: pointer; font-size: 0.9rem; font-weight: 700;
+  transition: all 0.15s;
+}
+.btn-zoom:hover { color: var(--accent); background: var(--bg-hover); }
+.btn-zoom:disabled { opacity: 0.3; cursor: not-allowed; }
+.zoom-level {
+  padding: 0 4px; color: var(--text-muted); font-size: 0.7rem;
+  min-width: 32px; text-align: center; font-variant-numeric: tabular-nums;
+}
 
 .user-info {
   display: flex; align-items: center; justify-content: space-between;

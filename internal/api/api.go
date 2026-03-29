@@ -10,6 +10,7 @@ import (
 
 	"github.com/dachony/dns-supreme/internal/auth"
 	"github.com/dachony/dns-supreme/internal/blockpage"
+	"github.com/dachony/dns-supreme/internal/certs"
 	"github.com/dachony/dns-supreme/internal/config"
 	"github.com/dachony/dns-supreme/internal/db"
 	dnsserver "github.com/dachony/dns-supreme/internal/dns"
@@ -30,6 +31,7 @@ type Server struct {
 	dnssec     *dnsserver.DNSSECManager
 	fail2ban      *Fail2Ban
 	mailer        *mailer.Mailer
+	acmeClient    *certs.ACMEClient
 	emailMFACodes map[int]emailMFAEntry // userID -> code+expiry
 	router        *gin.Engine
 }
@@ -50,6 +52,7 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 		dns:        dnsServer,
 		fail2ban:      NewFail2Ban(),
 		mailer:        mailer.New(),
+		acmeClient:    certs.NewACMEClient("/app/certs"),
 		emailMFACodes: make(map[int]emailMFAEntry),
 		dnssec:     dnsserver.NewDNSSECManager(),
 		router:     router,
@@ -60,6 +63,7 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 	s.LoadFail2BanConfig()
 	s.LoadPolicies()
 	s.LoadBlockPageTemplate()
+	s.loadACMEConfig()
 	s.getClusterFromDB()
 	s.setupRoutes()
 	return s
@@ -185,6 +189,9 @@ func (s *Server) setupRoutes() {
 		protected.POST("/certs/generate", s.generateSelfSigned)
 		protected.POST("/certs/upload", s.uploadCert)
 		protected.GET("/certs/export", s.exportCert)
+		protected.GET("/acme/config", s.getACMEConfig)
+		protected.PUT("/acme/config", s.setACMEConfig)
+		protected.POST("/acme/request", s.requestACMECert)
 
 		// DNSSEC
 		s.setupDNSSECRoutes(protected)

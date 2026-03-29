@@ -2,8 +2,10 @@ package api
 
 import (
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -160,4 +162,73 @@ func readCertInfo(certFile string) (*certInfo, error) {
 		IsCA:      cert.IsCA,
 		CertFile:  certFile,
 	}, nil
+}
+
+// --- ACME ---
+
+func (s *Server) getACMEConfig(c *gin.Context) {
+	cfg := s.acmeClient.GetConfig()
+	c.JSON(http.StatusOK, cfg)
+}
+
+func (s *Server) setACMEConfig(c *gin.Context) {
+	var cfg certs.ACMEConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s.acmeClient.SetConfig(cfg)
+	// Persist
+	if data, err := json.Marshal(cfg); err == nil {
+		s.db.SetSetting("acme_config", string(data))
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+type acmeRequestReq struct {
+	Domain string `json:"domain"`
+}
+
+func (s *Server) loadACMEConfig() {
+	if data := s.db.GetSetting("acme_config"); data != "" {
+		var cfg certs.ACMEConfig
+		if json.Unmarshal([]byte(data), &cfg) == nil {
+			s.acmeClient.SetConfig(cfg)
+		}
+	}
+}
+
+func (s *Server) requestACMECert(c *gin.Context) {
+	var req acmeRequestReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain required"})
+		return
+	}
+
+	// Wire DNS solver to create TXT records in our zones
+	s.acmeClient.SetDNSSolver(
+		func(fqdn, value string) error {
+			// Find or create zone for this domain
+			// Add TXT record _acme-challenge
+			log.Printf("[ACME] Setting DNS TXT %s = %s", fqdn, value)
+			return s.db.CreateACMERecord(fqdn, value)
+		},
+		func(fqdn string) error {
+			log.Printf("[ACME] Clearing DNS TXT %s", fqdn)
+			return s.db.DeleteACMERecord(fqdn)
+		},
+	)
+
+	// Run in background
+	go func() {
+		if err := s.acmeClient.RequestCertificate(req.Domain); err != nil {
+			log.Printf("[ACME] Certificate request failed for %s: %v", req.Domain, err)
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"status": "requesting", "domain": req.Domain})
 }

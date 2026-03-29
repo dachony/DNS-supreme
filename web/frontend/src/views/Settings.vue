@@ -964,13 +964,36 @@ function exportCert(format: string, domain?: string) {
   window.open(`/api/certs/export?${params}`, '_blank')
 }
 
-async function saveAcme() {
-  acmeMsg.value = 'ACME settings saved'
-  setTimeout(() => acmeMsg.value = '', 3000)
+async function loadAcmeConfig() {
+  try {
+    const { data } = await axios.get('/api/acme/config')
+    if (data.provider) acmeProvider.value = data.provider
+    if (data.email) acmeEmail.value = data.email
+    if (data.url) acmeUrl.value = data.url
+    if (data.challenge) acmeChallenge.value = data.challenge
+  } catch {}
 }
+
+async function saveAcme() {
+  acmeMsg.value = ''
+  try {
+    await axios.put('/api/acme/config', {
+      provider: acmeProvider.value, email: acmeEmail.value,
+      url: acmeUrl.value, challenge: acmeChallenge.value,
+    })
+    acmeMsg.value = 'ACME settings saved'
+    setTimeout(() => acmeMsg.value = '', 3000)
+  } catch (e: any) { acmeMsg.value = 'Failed: ' + (e.response?.data?.error || e.message) }
+}
+
 async function requestAcmeCert() {
-  acmeMsg.value = 'Requesting certificate... (this may take a moment)'
-  setTimeout(() => acmeMsg.value = 'Certificate request submitted. Check back shortly.', 2000)
+  acmeMsg.value = 'Requesting certificate...'
+  try {
+    const domain = primaryDomain.value || 'dnssupreme.local'
+    await axios.post('/api/acme/request', { domain })
+    acmeMsg.value = `Certificate request started for ${domain}. This may take a minute.`
+    setTimeout(() => acmeMsg.value = '', 10000)
+  } catch (e: any) { acmeMsg.value = 'Failed: ' + (e.response?.data?.error || e.message) }
 }
 const certZones = ref<any[]>([])
 
@@ -1216,7 +1239,7 @@ function previewBlockPage() {
   w.document.write(html)
 }
 
-onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings() })
+onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings(); loadAcmeConfig() })
 </script>
 
 <style scoped>

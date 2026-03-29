@@ -177,6 +177,16 @@ func (d *Database) GetAdminEmails() ([]string, error) {
 	return emails, nil
 }
 
+// ACME DNS challenge records (temporary TXT records)
+func (d *Database) CreateACMERecord(fqdn, value string) error {
+	// Store as a setting with acme_ prefix
+	return d.SetSetting("acme_txt_"+fqdn, value)
+}
+
+func (d *Database) DeleteACMERecord(fqdn string) error {
+	return d.DeleteSetting("acme_txt_" + fqdn)
+}
+
 // UserCount returns total user count
 func (d *Database) UserCountCheck() int {
 	var count int
