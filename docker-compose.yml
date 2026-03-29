@@ -6,11 +6,11 @@ services:
       - "53:53/udp"             # DNS UDP
       - "53:53/tcp"             # DNS TCP
       - "853:853/tcp"           # DNS-over-TLS
-      - "443:8443/tcp"          # DNS-over-HTTPS
+      - "8443:8443/tcp"         # DNS-over-HTTPS
       - "8853:8853/udp"         # DNS-over-QUIC
       - "80:80"                 # Block page HTTP
-      - "5380:5380"             # Management panel HTTP
-      - "53443:443"             # Management panel / Block page HTTPS
+      - "443:443"               # Block page HTTPS
+      - "5380:5380"             # Management panel
     environment:
       - DNS_LISTEN_ADDR=0.0.0.0
       - DNS_PORT=53

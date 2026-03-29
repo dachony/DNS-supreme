@@ -15,7 +15,7 @@ Open **http://localhost:5380** and login with `admin` / `admin`.
 ## Requirements
 
 - Docker and Docker Compose
-- Ports: 53 (DNS), 853 (DoT), 443 (DoH), 80 (block page), 5380 (web UI), 53443 (HTTPS)
+- Ports: 53 (DNS), 853 (DoT), 8443 (DoH), 80+443 (block page), 5380 (web UI)
 
 ## What's Included
 
@@ -77,12 +77,12 @@ Open **http://localhost:5380** and login with `admin` / `admin`.
 | Port | Protocol | Service |
 |------|----------|---------|
 | 53 | UDP+TCP | DNS (standard) |
-| 853 | TCP | DNS-over-TLS |
-| 443 | TCP | DNS-over-HTTPS |
-| 8853 | UDP | DNS-over-QUIC |
+| 853 | TCP | DNS-over-TLS (DoT) |
+| 8443 | TCP | DNS-over-HTTPS (DoH) |
+| 8853 | UDP | DNS-over-QUIC (DoQ) |
 | 80 | TCP | Block page HTTP |
+| 443 | TCP | Block page HTTPS (shows block page when user visits blocked HTTPS site) |
 | 5380 | TCP | Management panel (Web UI + API) |
-| 53443 | TCP | Management panel HTTPS / Block page HTTPS |
 
 ## Installation
 
