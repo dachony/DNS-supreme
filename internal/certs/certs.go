@@ -128,9 +128,11 @@ func GenerateAndSave(certFile, keyFile string, req *CertRequest) error {
 		validityDays = req.ValidityDays
 	}
 
-	dnsNames := []string{"localhost", subject.CommonName}
+	var dnsNames []string
 	if req != nil && len(req.DNSNames) > 0 {
-		dnsNames = append(dnsNames, req.DNSNames...)
+		dnsNames = req.DNSNames
+	} else {
+		dnsNames = []string{subject.CommonName}
 	}
 
 	template := &x509.Certificate{

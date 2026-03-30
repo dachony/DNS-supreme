@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/dachony/dns-supreme/internal/db"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,8 @@ func (s *Server) setupZoneRoutes(protected *gin.RouterGroup) {
 		zones.POST("/:id/records", s.createRecord)
 		zones.PUT("/:id/records/:rid", s.updateRecord)
 		zones.DELETE("/:id/records/:rid", s.deleteRecord)
+
+		zones.POST("/ptr", s.createPTRRecord)
 	}
 }
 
@@ -215,4 +218,44 @@ func (s *Server) deleteRecord(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+type createPTRReq struct {
+	IP       string `json:"ip" binding:"required"`
+	Hostname string `json:"hostname" binding:"required"`
+}
+
+func (s *Server) createPTRRecord(c *gin.Context) {
+	var req createPTRReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	parts := strings.Split(req.IP, ".")
+	if len(parts) != 4 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only IPv4 supported for auto-PTR"})
+		return
+	}
+
+	reverseZone := parts[2] + "." + parts[1] + "." + parts[0] + ".in-addr.arpa"
+	ptrName := parts[3]
+
+	zone, err := s.db.GetZoneByName(reverseZone)
+	if err != nil {
+		zone = &db.Zone{Name: reverseZone, Type: "primary", TTL: 3600}
+		if err := s.db.CreateZone(zone); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create reverse zone"})
+			return
+		}
+		settingsMu.RLock()
+		hn := hostnameStore
+		settingsMu.RUnlock()
+		soaVal := fmt.Sprintf("%s admin.%s %d 3600 900 604800 300", hn, reverseZone, zone.SOASerial)
+		s.db.CreateRecord(&db.DNSRecord{ZoneID: zone.ID, Name: "@", Type: "SOA", Value: soaVal, TTL: 3600})
+		s.db.CreateRecord(&db.DNSRecord{ZoneID: zone.ID, Name: "@", Type: "NS", Value: hn, TTL: 3600})
+	}
+
+	s.db.CreateRecord(&db.DNSRecord{ZoneID: zone.ID, Name: ptrName, Type: "PTR", Value: req.Hostname, TTL: 3600})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "reverse_zone": reverseZone, "ptr_name": ptrName})
 }

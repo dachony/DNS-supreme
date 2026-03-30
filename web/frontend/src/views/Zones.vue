@@ -97,7 +97,49 @@
         </div>
       </div>
 
-      <!-- DNS Records (primary content — first) -->
+      <!-- SSL Certificate (collapsible) -->
+      <div class="section section-cert" v-if="!selectedZone.name.includes('arpa')">
+        <div class="cert-header" @click="showCertSection = !showCertSection">
+          <h3>SSL Certificate</h3>
+          <div class="cert-header-right">
+            <span v-if="zoneCertInfo" class="cert-status-badge active">Active</span>
+            <span v-else class="cert-status-badge none">No certificate</span>
+            <span class="cert-collapse-icon">{{ showCertSection ? '\u25B2' : '\u25BC' }}</span>
+          </div>
+        </div>
+
+        <div v-if="showCertSection" class="cert-body">
+          <div v-if="zoneCertInfo" class="zone-cert-details">
+            <div class="detail-row">
+              <span class="detail-label">Subject</span>
+              <span class="detail-value">{{ zoneCertInfo.subject }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Issuer</span>
+              <span class="detail-value">{{ zoneCertInfo.issuer }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Expires</span>
+              <span class="detail-value">{{ zoneCertInfo.not_after ? new Date(zoneCertInfo.not_after).toLocaleDateString() : '-' }}</span>
+            </div>
+            <div class="detail-row" v-if="zoneCertInfo.dns_names?.length">
+              <span class="detail-label">DNS Names</span>
+              <span class="detail-value">{{ zoneCertInfo.dns_names.join(', ') }}</span>
+            </div>
+          </div>
+
+          <div class="zone-cert-actions">
+            <button @click="generateZoneSelfSigned" class="btn-primary">Generate Self-Signed</button>
+            <button @click="requestZoneAcmeCert" class="btn-primary" :disabled="!acmeConfigured || acmeRequesting">
+              {{ acmeRequesting ? 'Requesting...' : 'Request Let\'s Encrypt' }}
+            </button>
+          </div>
+          <div v-if="!acmeConfigured" class="hint-text" style="margin-top:6px">Configure ACME email in Settings &gt; Certificates to use Let's Encrypt.</div>
+          <div v-if="zoneCertMsg" :class="zoneCertMsgType === 'error' ? 'msg-error' : 'msg-success'" style="margin-top:8px">{{ zoneCertMsg }}</div>
+        </div>
+      </div>
+
+      <!-- DNS Records -->
       <div class="section">
         <h3>DNS Records</h3>
         <form class="record-form" @submit.prevent="addRecord">
@@ -124,6 +166,9 @@
               <label>Priority</label>
               <input v-model.number="newRecord.priority" type="number" />
             </div>
+            <label class="checkbox-inline" v-if="['A','AAAA'].includes(newRecord.type)">
+              <input type="checkbox" v-model="createPTR" /> Create PTR
+            </label>
             <button type="submit" class="btn-primary add-btn">Add Record</button>
           </div>
         </form>
@@ -166,43 +211,6 @@
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <!-- TLS Certificate for this zone -->
-      <div class="section" v-if="!selectedZone.name.includes('arpa')">
-        <div class="section-header-row">
-          <h3>TLS Certificate</h3>
-          <span v-if="zoneCertInfo" class="cert-status-badge" :class="zoneCertInfo.status">{{ zoneCertInfo.status }}</span>
-          <span v-else class="cert-status-badge none">No certificate</span>
-        </div>
-
-        <div v-if="zoneCertInfo" class="zone-cert-details">
-          <div class="detail-row">
-            <span class="detail-label">Subject</span>
-            <span class="detail-value">{{ zoneCertInfo.subject }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Issuer</span>
-            <span class="detail-value">{{ zoneCertInfo.issuer }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Expires</span>
-            <span class="detail-value">{{ zoneCertInfo.not_after ? new Date(zoneCertInfo.not_after).toLocaleDateString() : '-' }}</span>
-          </div>
-          <div class="detail-row" v-if="zoneCertInfo.dns_names?.length">
-            <span class="detail-label">DNS Names</span>
-            <span class="detail-value">{{ zoneCertInfo.dns_names.join(', ') }}</span>
-          </div>
-        </div>
-
-        <div class="zone-cert-actions">
-          <button @click="generateZoneSelfSigned" class="btn-secondary">Generate Self-Signed</button>
-          <button @click="requestZoneAcmeCert" class="btn-primary" :disabled="!acmeConfigured">
-            Request Let's Encrypt
-          </button>
-          <span v-if="!acmeConfigured" class="hint-text">Configure ACME in Settings &gt; Certificates first</span>
-        </div>
-        <div v-if="zoneCertMsg" class="msg-success" style="margin-top:8px">{{ zoneCertMsg }}</div>
       </div>
 
       <!-- Zone Infrastructure (SOA, NS, DNSSEC — bottom, collapsible) -->
@@ -313,6 +321,7 @@ const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA
 
 const newZone = ref({ name: '', type: 'primary', ttl: 3600, primary_ns: '', admin_email: '' })
 const newRecord = ref({ name: '', type: 'A', value: '', ttl: 3600, priority: 0 })
+const createPTR = ref(false)
 const editingRecord = ref<any>(null)
 
 const valuePlaceholder = computed(() => {
@@ -387,6 +396,19 @@ async function selectZone(z: any) {
 
 async function addRecord() {
   await axios.post(`/api/zones/${selectedZone.value.id}/records`, newRecord.value)
+
+  // Create PTR record in reverse zone if requested
+  if (createPTR.value && ['A', 'AAAA'].includes(newRecord.value.type) && newRecord.value.value) {
+    const ip = newRecord.value.value
+    const hostname = (newRecord.value.name === '@' ? '' : newRecord.value.name + '.') + selectedZone.value.name
+    try {
+      await axios.post('/api/zones/ptr', { ip, hostname })
+    } catch {
+      // Reverse zone may not exist — that's OK
+    }
+  }
+
+  createPTR.value = false
   newRecord.value = { name: '', type: 'A', value: '', ttl: 3600, priority: 0 }
   selectZone(selectedZone.value)
 }
@@ -451,17 +473,20 @@ function createSubdomainZone() {
 // --- Zone Certificate ---
 const zoneCertInfo = ref<any>(null)
 const zoneCertMsg = ref('')
+const zoneCertMsgType = ref('success')
 const acmeConfigured = ref(false)
+const acmeRequesting = ref(false)
+const showCertSection = ref(false)
+const requestRestart = inject('requestRestart') as () => void
 
 async function loadZoneCert(zoneName: string) {
   zoneCertInfo.value = null
   try {
     const { data } = await axios.get(`/api/certs/export?format=info&domain=${encodeURIComponent(zoneName)}`)
     if (data?.subject) {
-      zoneCertInfo.value = { ...data, status: 'active' }
+      zoneCertInfo.value = data
     }
   } catch {}
-  // Check if ACME is configured
   try {
     const { data } = await axios.get('/api/acme/config')
     acmeConfigured.value = !!(data?.email)
@@ -470,26 +495,57 @@ async function loadZoneCert(zoneName: string) {
 
 async function generateZoneSelfSigned() {
   zoneCertMsg.value = ''
+  zoneCertMsgType.value = 'success'
   try {
     const { data } = await axios.post('/api/certs/generate', { domain: selectedZone.value.name })
-    zoneCertMsg.value = data.message || 'Certificate generated'
-    loadZoneCert(selectedZone.value.name)
+    zoneCertMsg.value = data.message || 'Self-signed certificate generated.'
+    requestRestart()
+    setTimeout(() => loadZoneCert(selectedZone.value.name), 1000)
     setTimeout(() => zoneCertMsg.value = '', 5000)
   } catch (e: any) {
-    zoneCertMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+    zoneCertMsg.value = e.response?.data?.error || e.message
+    zoneCertMsgType.value = 'error'
   }
 }
 
 async function requestZoneAcmeCert() {
+  const domain = selectedZone.value.name
+  // Validate domain
+  const invalidSuffixes = ['.local', '.internal', '.lan', '.home', '.test', '.localhost', '.invalid', '.example']
+  if (invalidSuffixes.some(s => domain.endsWith(s)) || !domain.includes('.') || domain.split('.').pop().length < 2) {
+    zoneCertMsg.value = `Let's Encrypt cannot issue certificates for "${domain}". Only publicly resolvable domains are supported (e.g. example.com, dns.mycompany.org).`
+    zoneCertMsgType.value = 'error'
+    return
+  }
+
   zoneCertMsg.value = 'Requesting certificate from Let\'s Encrypt...'
+  zoneCertMsgType.value = 'success'
+  acmeRequesting.value = true
   try {
-    const { data } = await axios.post('/api/acme/request', { domain: selectedZone.value.name })
-    zoneCertMsg.value = data.message || 'Certificate request submitted. This may take a moment.'
-    // Poll for completion
-    setTimeout(() => loadZoneCert(selectedZone.value.name), 15000)
-    setTimeout(() => zoneCertMsg.value = '', 20000)
+    await axios.post('/api/acme/request', { domain })
+    zoneCertMsg.value = 'Certificate request submitted. Waiting for validation...'
+    // Poll for cert every 5 seconds for 60 seconds
+    let attempts = 0
+    const poll = setInterval(async () => {
+      attempts++
+      await loadZoneCert(selectedZone.value.name)
+      if (zoneCertInfo.value || attempts >= 12) {
+        clearInterval(poll)
+        acmeRequesting.value = false
+        if (zoneCertInfo.value) {
+          zoneCertMsg.value = 'Certificate issued successfully!'
+          requestRestart()
+        } else {
+          zoneCertMsg.value = 'Certificate not ready yet. Check Settings > Certificates for ACME status.'
+          zoneCertMsgType.value = 'error'
+        }
+        setTimeout(() => zoneCertMsg.value = '', 8000)
+      }
+    }, 5000)
   } catch (e: any) {
-    zoneCertMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+    zoneCertMsg.value = e.response?.data?.error || e.message
+    zoneCertMsgType.value = 'error'
+    acmeRequesting.value = false
   }
 }
 
@@ -542,7 +598,19 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
 }
 
 /* Zone cert */
-.zone-cert-details { background: var(--bg-input); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.section-cert { padding: 0 !important; overflow: hidden; }
+.cert-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px; cursor: pointer; transition: background 0.15s;
+}
+.cert-header:hover { background: var(--bg-hover); }
+.cert-header h3 { margin: 0; }
+.cert-header-right { display: flex; align-items: center; gap: 10px; }
+.cert-collapse-icon { color: var(--text-dim); font-size: 0.7rem; }
+.cert-body { padding: 0 24px 20px; }
+.zone-cert-details {
+  background: var(--bg-input); border-radius: 8px; padding: 12px; margin-bottom: 12px;
+}
 .zone-cert-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cert-status-badge {
   padding: 3px 10px; border-radius: 12px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
@@ -550,6 +618,12 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
 .cert-status-badge.active { background: rgba(34,197,94,0.15); color: #22c55e; }
 .cert-status-badge.none { background: rgba(100,116,139,0.15); color: #94a3b8; }
 .hint-text { color: var(--text-dim); font-size: 0.78rem; font-style: italic; }
+.msg-error { color: #ef4444; font-size: 0.85rem; }
+.checkbox-inline {
+  display: flex; align-items: center; gap: 5px; color: var(--text-secondary);
+  font-size: 0.82rem; cursor: pointer; white-space: nowrap; align-self: flex-end; padding-bottom: 10px;
+}
+.checkbox-inline input { cursor: pointer; }
 
 /* Infrastructure section */
 .section-infra { opacity: 0.9; }
