@@ -71,34 +71,63 @@
 
     <!-- TAB: Active Lists -->
     <div v-if="activeTab === 'lists'" class="tab-content">
-      <div class="add-form">
-        <input v-model="newName" placeholder="List name..." />
-        <input v-model="newUrl" placeholder="URL (hosts file, domain list, GitHub raw)..." class="url-input" />
-        <select v-model="newCategory">
-          <option value="ads">Ads</option><option value="malware">Malware</option>
-          <option value="adult">Adult</option><option value="social">Social</option>
-          <option value="gambling">Gambling</option><option value="tracking">Tracking</option>
-          <option value="uncategorized">Other</option>
-        </select>
-        <button @click="addList" :disabled="!newName || !newUrl" class="btn-add">Add List</button>
+      <div class="al-toolbar">
+        <div class="add-form" style="flex:1;margin-bottom:0">
+          <input v-model="newName" placeholder="List name..." />
+          <input v-model="newUrl" placeholder="URL (hosts file, domain list, GitHub raw)..." class="url-input" />
+          <select v-model="newCategory">
+            <option value="ads">Ads</option><option value="malware">Malware</option>
+            <option value="adult">Adult</option><option value="social">Social</option>
+            <option value="gambling">Gambling</option><option value="tracking">Tracking</option>
+            <option value="uncategorized">Other</option>
+          </select>
+          <button @click="addList" :disabled="!newName || !newUrl" class="btn-add">Add List</button>
+        </div>
+        <div class="al-actions">
+          <button @click="updateAllLists" :disabled="updatingLists" class="btn-update-now">
+            {{ updatingLists ? 'Updating...' : 'Update Now' }}
+          </button>
+          <button @click="deleteAllLists" :disabled="!lists.length" class="btn-delete-all">Delete All</button>
+        </div>
       </div>
       <div v-if="addError" class="error-msg">{{ addError }}</div>
 
+      <!-- Category filters -->
+      <div class="catalog-filters" style="margin-bottom:12px" v-if="lists.length">
+        <button v-for="cat in activeListCategories" :key="cat"
+          :class="{ active: activeListFilter === cat }" @click="activeListFilter = activeListFilter === cat ? '' : cat"
+          class="catalog-filter-btn">{{ cat }} <span class="filter-count">{{ activeListCategoryCounts[cat] || 0 }}</span></button>
+      </div>
+
       <div class="al-list">
-        <div v-for="list in lists" :key="list.name" class="al-row" @click="openListDetail(list)">
+        <div v-for="list in filteredActiveLists" :key="list.name" class="al-row" @click="openListDetail(list)">
           <span class="list-cat-badge" :class="list.category">{{ list.category }}</span>
           <div class="al-row-info">
             <span class="al-row-name">{{ list.name }}</span>
             <span class="al-row-url">{{ list.url }}</span>
           </div>
           <span class="al-row-count">{{ list.count?.toLocaleString() }} domains</span>
-          <button @click.stop="removeList(list.name)" class="al-row-remove" title="Remove">&times;</button>
+          <button @click.stop="removeList(list.name)" class="btn-delete-row" title="Delete">Delete</button>
         </div>
         <div v-if="!lists.length" class="empty">No blocklists configured — add one above or browse the Community Blocklists tab.</div>
+        <div v-else-if="!filteredActiveLists.length" class="empty">No lists match the selected category.</div>
       </div>
 
       <div class="stats-bar" v-if="totalDomains > 0">
         Total: {{ totalDomains.toLocaleString() }} domains across {{ totalLists }} lists
+      </div>
+
+      <!-- Update Schedule -->
+      <div class="update-schedule" v-if="lists.length">
+        <span class="schedule-label">Auto-update:</span>
+        <select v-model="updateInterval" @change="saveUpdateInterval" class="schedule-select">
+          <option value="0">Disabled</option>
+          <option value="6">Every 6 hours</option>
+          <option value="12">Every 12 hours</option>
+          <option value="24">Every 24 hours</option>
+          <option value="48">Every 48 hours</option>
+          <option value="168">Weekly</option>
+        </select>
       </div>
 
       <!-- List detail modal -->
@@ -142,10 +171,10 @@
               class="catalog-filter-btn">{{ cat }}</button>
           </div>
         </div>
-        <div class="community-actions" v-if="newCatalogCount > 0">
-          <span class="new-count-badge">{{ newCatalogCount }} new</span>
-          <button @click="addAllNewFromCatalog" :disabled="catalogAdding === 'all'" class="btn-add-all-new">
-            {{ catalogAdding === 'all' ? 'Adding...' : 'Add All New' }}
+        <div class="community-actions">
+          <span v-if="newCatalogCount > 0" class="new-count-badge">{{ newCatalogCount }} available</span>
+          <button @click="checkForUpdates" :disabled="catalogAdding === 'checking'" class="btn-check-updates">
+            {{ catalogAdding === 'checking' ? 'Checking...' : 'Check for Updates' }}
           </button>
         </div>
       </div>
@@ -397,8 +426,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, inject } from 'vue'
 import axios from 'axios'
+
+const confirm = inject('confirm') as (opts: any) => Promise<boolean>
 
 // --- Tabs ---
 const activeTab = ref('services')
@@ -686,19 +717,72 @@ const newCatalogCount = computed(() => {
   return count
 })
 
-async function addAllNewFromCatalog() {
-  catalogAdding.value = 'all'
-  for (const provider of blocklistCatalog) {
-    for (const item of provider.lists) {
-      if (!isListAdded(item.name)) {
-        try {
-          await axios.post('/api/blocklists', { name: item.name, url: item.url, category: item.category })
-        } catch {}
-      }
-    }
+// Active list filtering
+const activeListFilter = ref('')
+const activeListCategories = computed(() => {
+  const cats = new Set(lists.value.map((l: any) => l.category))
+  return Array.from(cats).sort()
+})
+const activeListCategoryCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const l of lists.value) {
+    counts[l.category] = (counts[l.category] || 0) + 1
   }
-  catalogAdding.value = ''
+  return counts
+})
+const filteredActiveLists = computed(() => {
+  if (!activeListFilter.value) return lists.value
+  return lists.value.filter((l: any) => l.category === activeListFilter.value)
+})
+
+// Update all active lists
+const updatingLists = ref(false)
+async function updateAllLists() {
+  updatingLists.value = true
+  addError.value = ''
+  try {
+    await axios.post('/api/blocklists/update')
+    loadAll()
+  } catch (e: any) {
+    addError.value = e.response?.data?.error || 'Failed to update lists'
+  } finally {
+    updatingLists.value = false
+  }
+}
+
+// Delete all active lists
+async function deleteAllLists() {
+  if (!await confirm({ title: 'Delete All Lists', message: `Delete all ${lists.value.length} active blocklists? All domain filtering will be disabled until new lists are added.`, confirmText: 'Delete All', danger: true })) return
+  for (const list of [...lists.value]) {
+    try {
+      await axios.delete(`/api/blocklists/${encodeURIComponent(list.name)}`)
+    } catch {}
+  }
   loadAll()
+}
+
+// Update schedule
+const updateInterval = ref(0)
+async function loadUpdateInterval() {
+  try {
+    const { data } = await axios.get('/api/blocklists/schedule')
+    updateInterval.value = data.interval_hours || 0
+  } catch {}
+}
+async function saveUpdateInterval() {
+  try {
+    await axios.put('/api/blocklists/schedule', { interval_hours: Number(updateInterval.value) })
+  } catch {}
+}
+
+// Check for updates — refresh catalog info, don't auto-add
+async function checkForUpdates() {
+  catalogAdding.value = 'checking'
+  try {
+    await axios.post('/api/blocklists/update')
+    loadAll()
+  } catch {}
+  catalogAdding.value = ''
 }
 
 async function addFromCatalog(item: CatalogItem) {
@@ -947,7 +1031,8 @@ async function addList() {
 }
 
 async function removeList(name: string) {
-  await axios.delete(`/api/blocklists/${name}`)
+  if (!await confirm({ title: 'Delete List', message: `Delete blocklist "${name}"? The list will be removed from active filtering.`, confirmText: 'Delete', danger: true })) return
+  await axios.delete(`/api/blocklists/${encodeURIComponent(name)}`)
   loadAll()
 }
 
@@ -1025,6 +1110,7 @@ onMounted(() => {
   loadAll()
   loadNpCategories()
   loadNpSettings()
+  loadUpdateInterval()
   document.addEventListener('click', closeGeoDropdown)
 })
 </script>
@@ -1210,11 +1296,51 @@ onMounted(() => {
 .al-row-name { color: var(--text-primary); font-weight: 600; font-size: 0.9rem; display: block; }
 .al-row-url { color: var(--text-dim); font-size: 0.72rem; display: block; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .al-row-count { color: var(--accent); font-size: 0.82rem; font-weight: 500; white-space: nowrap; flex-shrink: 0; }
-.al-row-remove {
-  background: none; border: none; color: var(--text-dim); cursor: pointer;
-  font-size: 1.2rem; line-height: 1; padding: 4px 8px; border-radius: 4px; transition: all 0.15s; flex-shrink: 0;
+.btn-delete-row {
+  background: none; border: 1px solid rgba(239,68,68,0.3); color: #ef4444; cursor: pointer;
+  font-size: 0.78rem; padding: 4px 12px; border-radius: 5px; transition: all 0.15s; flex-shrink: 0;
+  font-weight: 500;
 }
-.al-row-remove:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+.btn-delete-row:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; }
+
+/* Active lists toolbar */
+.al-toolbar { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; }
+.al-actions { display: flex; gap: 8px; flex-shrink: 0; padding-top: 2px; }
+.btn-update-now {
+  padding: 8px 16px; background: var(--accent); color: #fff; border: none;
+  border-radius: 6px; cursor: pointer; font-size: 0.82rem; white-space: nowrap; transition: opacity 0.15s;
+}
+.btn-update-now:hover:not(:disabled) { opacity: 0.85; }
+.btn-update-now:disabled { opacity: 0.5; cursor: wait; }
+.btn-delete-all {
+  padding: 8px 16px; background: none; color: #ef4444; border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 6px; cursor: pointer; font-size: 0.82rem; white-space: nowrap; transition: all 0.15s;
+}
+.btn-delete-all:hover:not(:disabled) { background: rgba(239,68,68,0.1); border-color: #ef4444; }
+.btn-delete-all:disabled { opacity: 0.3; cursor: not-allowed; }
+.filter-count {
+  font-size: 0.68rem; opacity: 0.7; margin-left: 2px;
+}
+
+/* Check for updates button */
+.btn-check-updates {
+  padding: 7px 16px; background: linear-gradient(135deg, var(--accent), var(--brand-secondary, #818cf8));
+  color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
+  transition: opacity 0.15s; white-space: nowrap;
+}
+.btn-check-updates:hover { opacity: 0.85; }
+.btn-check-updates:disabled { opacity: 0.5; cursor: wait; }
+
+.update-schedule {
+  margin-top: 12px; padding: 10px 14px; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 8px;
+  display: flex; align-items: center; gap: 10px;
+}
+.schedule-label { color: var(--text-secondary); font-size: 0.85rem; font-weight: 500; }
+.schedule-select {
+  padding: 5px 10px; background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-primary); font-size: 0.85rem; cursor: pointer;
+}
 
 /* List detail modal */
 .modal-overlay {

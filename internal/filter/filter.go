@@ -302,6 +302,43 @@ func (e *Engine) AddList(name, url string, category Category) error {
 	return nil
 }
 
+func (e *Engine) UpdateList(name string) error {
+	e.mu.RLock()
+	var url string
+	var category Category
+	found := false
+	for _, l := range e.lists {
+		if l.Name == name {
+			url = l.URL
+			category = l.Category
+			found = true
+			break
+		}
+	}
+	e.mu.RUnlock()
+
+	if !found {
+		return fmt.Errorf("list %s not found", name)
+	}
+
+	count, err := e.loadFromURL(url, name, category)
+	if err != nil {
+		return err
+	}
+
+	e.mu.Lock()
+	for i, l := range e.lists {
+		if l.Name == name {
+			e.lists[i].Count = count
+			break
+		}
+	}
+	e.mu.Unlock()
+
+	log.Printf("[Filter] Updated list '%s' (%d domains)", name, count)
+	return nil
+}
+
 func (e *Engine) RemoveList(name string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

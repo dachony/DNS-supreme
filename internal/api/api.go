@@ -34,8 +34,9 @@ type Server struct {
 	fail2ban      *Fail2Ban
 	mailer        *mailer.Mailer
 	acmeClient    *certs.ACMEClient
-	emailMFACodes map[int]emailMFAEntry // userID -> code+expiry
-	router        *gin.Engine
+	emailMFACodes  map[int]emailMFAEntry // userID -> code+expiry
+	blocklistTimer *time.Timer
+	router         *gin.Engine
 }
 
 func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter.Engine, netProtect *filter.NetProtectEngine, bp *blockpage.Server, dnsServer *dnsserver.Server) *Server {
@@ -124,6 +125,9 @@ func (s *Server) setupRoutes() {
 		// Blocklists
 		protected.GET("/blocklists", s.getBlocklists)
 		protected.POST("/blocklists", s.addBlocklist)
+		protected.POST("/blocklists/update", s.updateBlocklists)
+		protected.GET("/blocklists/schedule", s.getBlocklistSchedule)
+		protected.PUT("/blocklists/schedule", s.setBlocklistSchedule)
 		protected.DELETE("/blocklists/:name", s.removeBlocklist)
 		protected.GET("/blocklists/:name/domains", s.getBlocklistDomains)
 
@@ -264,6 +268,15 @@ func (s *Server) restartServer(c *gin.Context) {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.Port)
 	log.Printf("[API] Web UI and API available at http://%s", addr)
+
+	// Restore blocklist auto-update schedule
+	if v := s.db.GetSetting("blocklist_update_hours"); v != "" {
+		var hours int
+		if json.Unmarshal([]byte(v), &hours) == nil && hours > 0 {
+			s.startBlocklistTimer(hours)
+		}
+	}
+
 	go func() {
 		if err := s.router.Run(addr); err != nil {
 			log.Fatalf("[API] Server failed: %v", err)
@@ -723,6 +736,72 @@ func (s *Server) addBlocklist(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) updateBlocklists(c *gin.Context) {
+	lists := s.filter.GetLists()
+	go func() {
+		for _, l := range lists {
+			if err := s.filter.UpdateList(l.Name); err != nil {
+				log.Printf("[Filter] Failed to update list '%s': %v", l.Name, err)
+				continue
+			}
+			updated := s.filter.GetLists()
+			for _, u := range updated {
+				if u.Name == l.Name {
+					s.db.SaveBlocklistWithCategory(u.Name, l.URL, string(u.Category), u.Count)
+					break
+				}
+			}
+		}
+		log.Printf("[Filter] Updated %d blocklists", len(lists))
+	}()
+	c.JSON(http.StatusOK, gin.H{"status": "updating", "count": len(lists)})
+}
+
+func (s *Server) getBlocklistSchedule(c *gin.Context) {
+	hours := 0
+	if v := s.db.GetSetting("blocklist_update_hours"); v != "" {
+		json.Unmarshal([]byte(v), &hours)
+	}
+	c.JSON(http.StatusOK, gin.H{"interval_hours": hours})
+}
+
+func (s *Server) setBlocklistSchedule(c *gin.Context) {
+	var req struct {
+		IntervalHours int `json:"interval_hours"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	data, _ := json.Marshal(req.IntervalHours)
+	s.db.SetSetting("blocklist_update_hours", string(data))
+	s.startBlocklistTimer(req.IntervalHours)
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "interval_hours": req.IntervalHours})
+}
+
+func (s *Server) startBlocklistTimer(hours int) {
+	if s.blocklistTimer != nil {
+		s.blocklistTimer.Stop()
+		s.blocklistTimer = nil
+	}
+	if hours <= 0 {
+		log.Println("[Filter] Auto-update disabled")
+		return
+	}
+	d := time.Duration(hours) * time.Hour
+	s.blocklistTimer = time.AfterFunc(d, func() {
+		log.Printf("[Filter] Auto-update triggered (every %dh)", hours)
+		lists := s.filter.GetLists()
+		for _, l := range lists {
+			if err := s.filter.UpdateList(l.Name); err != nil {
+				log.Printf("[Filter] Auto-update failed for '%s': %v", l.Name, err)
+			}
+		}
+		s.startBlocklistTimer(hours) // re-schedule
+	})
+	log.Printf("[Filter] Auto-update scheduled every %d hours", hours)
 }
 
 func (s *Server) removeBlocklist(c *gin.Context) {
