@@ -291,6 +291,18 @@ func (s *Server) loadACMEConfig() {
 	}
 }
 
+func (s *Server) getACMEStatus(c *gin.Context) {
+	domain := c.Param("domain")
+	data := s.db.GetSetting("acme_status_" + domain)
+	if data == "" {
+		c.JSON(http.StatusOK, gin.H{"status": "none"})
+		return
+	}
+	var status map[string]interface{}
+	json.Unmarshal([]byte(data), &status)
+	c.JSON(http.StatusOK, status)
+}
+
 func (s *Server) requestACMECert(c *gin.Context) {
 	var req acmeRequestReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -316,10 +328,19 @@ func (s *Server) requestACMECert(c *gin.Context) {
 		},
 	)
 
-	// Run in background
+	// Store status and run in background
+	s.db.SetSetting("acme_status_"+req.Domain, `{"status":"pending","domain":"`+req.Domain+`"}`)
+
 	go func() {
 		if err := s.acmeClient.RequestCertificate(req.Domain); err != nil {
 			log.Printf("[ACME] Certificate request failed for %s: %v", req.Domain, err)
+			errMsg := err.Error()
+			if len(errMsg) > 200 {
+				errMsg = errMsg[:200]
+			}
+			s.db.SetSetting("acme_status_"+req.Domain, `{"status":"failed","domain":"`+req.Domain+`","error":"`+errMsg+`"}`)
+		} else {
+			s.db.SetSetting("acme_status_"+req.Domain, `{"status":"issued","domain":"`+req.Domain+`"}`)
 		}
 	}()
 

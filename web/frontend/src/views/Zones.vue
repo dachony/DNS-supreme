@@ -55,9 +55,16 @@
 
     <!-- Zones List -->
     <div class="section" v-if="zones.length && !selectedZone">
-      <h3>Zones</h3>
+      <div class="zones-header">
+        <h3>Zones</h3>
+        <div class="zone-filters">
+          <button :class="{ active: zoneFilter === 'all' }" @click="zoneFilter = 'all'">All ({{ zones.length }})</button>
+          <button :class="{ active: zoneFilter === 'forward' }" @click="zoneFilter = 'forward'">Forward ({{ forwardZoneCount }})</button>
+          <button :class="{ active: zoneFilter === 'reverse' }" @click="zoneFilter = 'reverse'">Reverse ({{ reverseZoneCount }})</button>
+        </div>
+      </div>
       <div class="zones-list">
-        <div v-for="z in zones" :key="z.id" class="zone-row" @click="selectZone(z)">
+        <div v-for="z in filteredZones" :key="z.id" class="zone-row" @click="selectZone(z)">
           <div class="zone-row-badges">
             <span v-if="z.name === primaryDomain" class="zone-primary-badge">Primary</span>
             <span class="zone-type-badge" :class="z.type">{{ z.type }}</span>
@@ -68,6 +75,7 @@
             <span class="zone-row-name">{{ z.name }}</span>
             <span class="zone-row-meta">{{ z.record_count }} records &middot; SOA {{ z.soa_serial }} &middot; TTL {{ z.ttl }}s</span>
           </div>
+          <button @click.stop="exportZone(z)" class="zone-row-export-btn" title="Export zone file">Export</button>
           <button v-if="z.name !== primaryDomain" @click.stop="setAsPrimary(z)" class="zone-row-primary-btn" title="Set as primary domain">Set Primary</button>
           <button @click.stop="deleteZone(z)" class="zone-row-delete-btn">Delete</button>
         </div>
@@ -285,6 +293,15 @@ const confirm = inject('confirm') as (opts: any) => Promise<boolean>
 
 const zones = ref<any[]>([])
 const selectedZone = ref<any>(null)
+const zoneFilter = ref('all')
+
+const forwardZoneCount = computed(() => zones.value.filter(z => !z.name.includes('arpa')).length)
+const reverseZoneCount = computed(() => zones.value.filter(z => z.name.includes('arpa')).length)
+const filteredZones = computed(() => {
+  if (zoneFilter.value === 'forward') return zones.value.filter(z => !z.name.includes('arpa'))
+  if (zoneFilter.value === 'reverse') return zones.value.filter(z => z.name.includes('arpa'))
+  return zones.value
+})
 const primaryDomain = ref('')
 const serverHostname = ref('')
 
@@ -450,6 +467,16 @@ async function removeZoneDNSSEC() {
 
 function copyText(t: string) { navigator.clipboard.writeText(t) }
 
+async function exportZone(z: any) {
+  try {
+    const { data } = await axios.get(`/api/zones/${z.id}/export`, { responseType: 'blob' })
+    const url = URL.createObjectURL(data)
+    const a = document.createElement('a')
+    a.href = url; a.download = z.name + '.zone'; a.click()
+    URL.revokeObjectURL(url)
+  } catch {}
+}
+
 const matchingReverseZone = computed(() => {
   if (!selectedZone.value || selectedZone.value.name.includes('arpa')) return null
   return zones.value.find((z: any) => z.name.includes('arpa'))
@@ -524,24 +551,37 @@ async function requestZoneAcmeCert() {
   try {
     await axios.post('/api/acme/request', { domain })
     zoneCertMsg.value = 'Certificate request submitted. Waiting for validation...'
-    // Poll for cert every 5 seconds for 60 seconds
+    // Poll ACME status every 3 seconds for 90 seconds
     let attempts = 0
     const poll = setInterval(async () => {
       attempts++
-      await loadZoneCert(selectedZone.value.name)
-      if (zoneCertInfo.value || attempts >= 12) {
+      try {
+        const { data: status } = await axios.get(`/api/acme/status/${encodeURIComponent(domain)}`)
+        if (status.status === 'issued') {
+          clearInterval(poll)
+          acmeRequesting.value = false
+          zoneCertMsg.value = 'Certificate issued by Let\'s Encrypt!'
+          zoneCertMsgType.value = 'success'
+          requestRestart()
+          loadZoneCert(domain)
+          setTimeout(() => zoneCertMsg.value = '', 8000)
+          return
+        }
+        if (status.status === 'failed') {
+          clearInterval(poll)
+          acmeRequesting.value = false
+          zoneCertMsg.value = status.error || 'Certificate request failed. Check that the domain resolves to this server from the internet.'
+          zoneCertMsgType.value = 'error'
+          return
+        }
+      } catch {}
+      if (attempts >= 30) {
         clearInterval(poll)
         acmeRequesting.value = false
-        if (zoneCertInfo.value) {
-          zoneCertMsg.value = 'Certificate issued successfully!'
-          requestRestart()
-        } else {
-          zoneCertMsg.value = 'Certificate not ready yet. Check Settings > Certificates for ACME status.'
-          zoneCertMsgType.value = 'error'
-        }
-        setTimeout(() => zoneCertMsg.value = '', 8000)
+        zoneCertMsg.value = 'Request timed out. Check server logs for details.'
+        zoneCertMsgType.value = 'error'
       }
-    }, 5000)
+    }, 3000)
   } catch (e: any) {
     zoneCertMsg.value = e.response?.data?.error || e.message
     zoneCertMsgType.value = 'error'
@@ -700,6 +740,15 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
 .zone-title { color: var(--text-primary); font-size: 1.2rem; }
 
 /* Zones list */
+.zones-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.zones-header h3 { margin: 0; }
+.zone-filters { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.zone-filters button {
+  padding: 5px 14px; background: var(--bg-input); border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 0.8rem; transition: all 0.15s; border-right: 1px solid var(--border);
+}
+.zone-filters button:last-child { border-right: none; }
+.zone-filters button.active { background: var(--accent); color: #fff; }
 .zones-list { display: flex; flex-direction: column; gap: 6px; }
 .zone-row {
   display: flex; align-items: center; gap: 14px; padding: 12px 16px;
@@ -723,6 +772,12 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
   transition: all 0.15s; flex-shrink: 0;
 }
 .zone-row-primary-btn:hover { background: rgba(56,189,248,0.1); }
+.zone-row-export-btn {
+  padding: 4px 12px; background: transparent; border: 1px solid var(--border);
+  color: var(--text-secondary); border-radius: 6px; cursor: pointer; font-size: 0.78rem;
+  transition: all 0.15s; flex-shrink: 0;
+}
+.zone-row-export-btn:hover { border-color: var(--accent); color: var(--accent); }
 .zone-row-delete-btn {
   padding: 4px 12px; background: transparent; border: 1px solid rgba(239,68,68,0.3);
   color: #ef4444; border-radius: 6px; cursor: pointer; font-size: 0.78rem;

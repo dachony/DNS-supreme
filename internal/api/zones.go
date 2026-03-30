@@ -22,6 +22,7 @@ func (s *Server) setupZoneRoutes(protected *gin.RouterGroup) {
 		zones.POST("/:id/records", s.createRecord)
 		zones.PUT("/:id/records/:rid", s.updateRecord)
 		zones.DELETE("/:id/records/:rid", s.deleteRecord)
+		zones.GET("/:id/export", s.exportZone)
 
 		zones.POST("/ptr", s.createPTRRecord)
 	}
@@ -218,6 +219,38 @@ func (s *Server) deleteRecord(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) exportZone(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	zone, err := s.db.GetZone(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "zone not found"})
+		return
+	}
+	records, _ := s.db.ListRecords(id)
+
+	// Generate BIND zone file format
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("; Zone file for %s\n", zone.Name))
+	b.WriteString(fmt.Sprintf("; Exported from DNS Supreme\n"))
+	b.WriteString(fmt.Sprintf("$ORIGIN %s.\n", zone.Name))
+	b.WriteString(fmt.Sprintf("$TTL %d\n\n", zone.TTL))
+
+	for _, r := range records {
+		name := r.Name
+		if name == "@" {
+			name = zone.Name + "."
+		}
+		if r.Type == "MX" || r.Type == "SRV" {
+			b.WriteString(fmt.Sprintf("%-24s %d IN %-6s %d %s\n", name, r.TTL, r.Type, r.Priority, r.Value))
+		} else {
+			b.WriteString(fmt.Sprintf("%-24s %d IN %-6s %s\n", name, r.TTL, r.Type, r.Value))
+		}
+	}
+
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.zone", zone.Name))
+	c.Data(http.StatusOK, "text/plain", []byte(b.String()))
 }
 
 type createPTRReq struct {

@@ -203,11 +203,13 @@ func (s *Server) setupRoutes() {
 		protected.POST("/certs/upload", s.uploadCert)
 		protected.GET("/certs/export", s.exportCert)
 		protected.GET("/acme/config", s.getACMEConfig)
+		protected.GET("/acme/status/:domain", s.getACMEStatus)
 		protected.PUT("/acme/config", s.setACMEConfig)
 		protected.POST("/acme/request", s.requestACMECert)
 
 		// DNSSEC
 		s.setupDNSSECRoutes(protected)
+		s.setupBackupRoutes(protected)
 
 		// Per-device policies
 		s.setupPolicyRoutes(protected)

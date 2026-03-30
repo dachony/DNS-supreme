@@ -899,6 +899,72 @@
       </div>
     </div>
 
+    <!-- TAB: Backup & Restore -->
+    <div v-if="activeTab === 'backup'" class="tab-content">
+      <div class="backup-split">
+        <div class="backup-left">
+          <!-- Backup -->
+          <div class="subsection">
+            <h4>Create Backup</h4>
+            <p class="section-desc">Export all server configuration, DNS zones, records, blocklist settings, and user accounts to a single file.</p>
+            <div class="backup-includes">
+              <span class="backup-tag">Settings</span>
+              <span class="backup-tag">DNS Zones</span>
+              <span class="backup-tag">DNS Records</span>
+              <span class="backup-tag">Blocklist Config</span>
+              <span class="backup-tag">User Accounts</span>
+              <span class="backup-tag">DNSSEC Keys</span>
+              <span class="backup-tag">ACME Config</span>
+              <span class="backup-tag">Network Protection</span>
+            </div>
+            <button @click="createBackup" class="btn-primary" style="margin-top:12px">Download Backup</button>
+            <div v-if="backupMsg" class="msg-success" style="margin-top:8px">{{ backupMsg }}</div>
+          </div>
+
+          <!-- Restore -->
+          <div class="subsection" style="margin-top:20px">
+            <h4>Restore from Backup</h4>
+            <p class="section-desc">Upload a backup file to restore configuration to this instance. Existing data will be merged (not overwritten).</p>
+            <div class="restore-upload">
+              <label class="btn-primary upload-btn">
+                Select Backup File (.json)
+                <input type="file" @change="handleRestoreFile" style="display:none" accept=".json" />
+              </label>
+            </div>
+            <div v-if="restoreMsg" :class="restoreMsgType === 'error' ? 'msg-error' : 'msg-success'" style="margin-top:8px">{{ restoreMsg }}</div>
+          </div>
+        </div>
+
+        <div class="backup-right">
+          <div class="how-it-works">
+            <h4>How It Works</h4>
+            <div class="hiw-section">
+              <h5>Backup</h5>
+              <p>Downloads a JSON file containing your complete server configuration. Use this to:</p>
+              <ul>
+                <li>Migrate to a new server</li>
+                <li>Create a snapshot before major changes</li>
+                <li>Set up a secondary instance with same config</li>
+                <li>Disaster recovery</li>
+              </ul>
+              <p><strong>Note:</strong> Query logs and blocklist domain data are NOT included (they're too large and rebuild automatically).</p>
+            </div>
+            <div class="hiw-section">
+              <h5>Restore</h5>
+              <p>Upload a previously exported backup file. The restore process:</p>
+              <ol>
+                <li>Reads the backup file</li>
+                <li>Restores all settings</li>
+                <li>Creates zones and DNS records</li>
+                <li>Existing zones with same name are skipped</li>
+              </ol>
+              <p><strong>Note:</strong> User passwords are not included in backups for security. Users will need to reset passwords after restore.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -922,6 +988,7 @@ const settingsTabs = [
   { id: 'logs', label: 'Log Management' },
   { id: 'mail', label: 'Mail' },
   { id: 'users', label: 'Users' },
+  { id: 'backup', label: 'Backup & Restore' },
 ]
 
 // --- Users ---
@@ -1661,6 +1728,47 @@ async function saveBlockPage() {
   setTimeout(() => bpMsg.value = '', 3000)
 }
 
+// --- Backup & Restore ---
+const backupMsg = ref('')
+const restoreMsg = ref('')
+const restoreMsgType = ref('success')
+
+async function createBackup() {
+  backupMsg.value = 'Generating backup...'
+  try {
+    const { data, headers } = await axios.get('/api/backup/export', { responseType: 'blob' })
+    const disposition = headers['content-disposition'] || ''
+    const match = disposition.match(/filename=(.+)/)
+    const filename = match ? match[1] : 'dns-supreme-backup.json'
+    const url = URL.createObjectURL(data)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+    backupMsg.value = 'Backup downloaded!'
+    setTimeout(() => backupMsg.value = '', 3000)
+  } catch {
+    backupMsg.value = 'Failed to create backup'
+  }
+}
+
+async function handleRestoreFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+  restoreMsg.value = 'Restoring...'
+  restoreMsgType.value = 'success'
+  const formData = new FormData()
+  formData.append('backup', input.files[0])
+  try {
+    const { data } = await axios.post('/api/backup/restore', formData)
+    restoreMsg.value = data.message || 'Restore complete!'
+    loadAll()
+  } catch (e: any) {
+    restoreMsg.value = e.response?.data?.error || 'Restore failed'
+    restoreMsgType.value = 'error'
+  }
+  input.value = ''
+}
+
 onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings(); loadAcmeConfig() })
 </script>
 
@@ -1984,6 +2092,19 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 .btn-danger { background: #ef4444; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
 .btn-danger:hover { background: #dc2626; }
 .btn-danger:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* Backup */
+.backup-split { display: flex; gap: 24px; }
+.backup-left { flex: 1; min-width: 0; }
+.backup-right { width: 320px; flex-shrink: 0; }
+@media (max-width: 900px) { .backup-split { flex-direction: column; } .backup-right { width: 100%; } }
+.backup-includes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.backup-tag {
+  padding: 4px 10px; background: var(--bg-hover); border: 1px solid var(--border);
+  border-radius: 6px; font-size: 0.78rem; color: var(--text-secondary);
+}
+.restore-upload { margin-top: 12px; }
+.msg-error { color: #ef4444; font-size: 0.85rem; }
 
 /* Code editor */
 .code-editor {
