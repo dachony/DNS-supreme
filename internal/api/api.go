@@ -270,6 +270,9 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.Port)
 	log.Printf("[API] Web UI and API available at http://%s", addr)
 
+	// Restore DNSSEC keys from database
+	s.restoreDNSSECKeys()
+
 	// Restore blocklist auto-update schedule
 	if v := s.db.GetSetting("blocklist_update_hours"); v != "" {
 		var hours int

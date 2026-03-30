@@ -90,6 +90,11 @@
         <span>TTL: <strong>{{ selectedZone.ttl }}s</strong></span>
         <span>Type: <strong>{{ selectedZone.type === 'primary' ? 'Primary' : 'Secondary' }}</strong></span>
         <span>Records: <strong>{{ userRecords.length }}</strong></span>
+        <div class="zone-info-actions" v-if="!selectedZone.name.includes('arpa')">
+          <button @click="createSubdomainZone" class="btn-link">+ Subdomain Zone</button>
+          <button v-if="!hasMatchingReverse" @click="createReverseForZone" class="btn-link">+ Reverse Zone</button>
+          <span v-if="matchingReverseZone" class="zone-link" @click="selectZone(matchingReverseZone)">Reverse: {{ matchingReverseZone.name }}</span>
+        </div>
       </div>
 
       <!-- DNS Records (primary content — first) -->
@@ -385,6 +390,26 @@ async function removeZoneDNSSEC() {
 
 function copyText(t: string) { navigator.clipboard.writeText(t) }
 
+const matchingReverseZone = computed(() => {
+  if (!selectedZone.value || selectedZone.value.name.includes('arpa')) return null
+  return zones.value.find((z: any) => z.name.includes('arpa'))
+})
+const hasMatchingReverse = computed(() => !!matchingReverseZone.value)
+
+async function createReverseForZone() {
+  selectedZone.value = null
+  zoneMode.value = 'reverse'
+  reverseSubnet.value = ''
+  newZone.value.name = ''
+}
+
+function createSubdomainZone() {
+  const parent = selectedZone.value.name
+  selectedZone.value = null
+  zoneMode.value = 'forward'
+  newZone.value.name = 'sub.' + parent
+}
+
 function autoGenerateReverse() {
   const parts = reverseSubnet.value.trim().split('.').filter(p => p !== '').reverse()
   if (parts.length > 0) {
@@ -407,6 +432,12 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
   font-size: 0.85rem; color: var(--text-secondary); flex-wrap: wrap;
 }
 .zone-info-bar strong { color: var(--text-primary); }
+.zone-link {
+  color: var(--accent); cursor: pointer; font-size: 0.85rem; margin-left: auto;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.zone-link:hover { opacity: 0.8; }
+.zone-info-actions { display: flex; gap: 12px; align-items: center; margin-left: auto; }
 
 /* Zone mode toggle */
 .zone-mode-toggle {

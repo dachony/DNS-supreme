@@ -1,8 +1,11 @@
 package api
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
 
+	dnsserver "github.com/dachony/dns-supreme/internal/dns"
 	"github.com/gin-gonic/gin"
 )
 
@@ -38,7 +41,7 @@ func (s *Server) generateDNSSECKey(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
+	s.persistDNSSECKeys()
 	c.JSON(http.StatusOK, key)
 }
 
@@ -64,11 +67,35 @@ func (s *Server) toggleDNSSEC(c *gin.Context) {
 		return
 	}
 	s.dnssec.SetEnabled(zone, req.Enabled)
+	s.persistDNSSECKeys()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (s *Server) deleteDNSSECKey(c *gin.Context) {
 	zone := c.Param("zone")
 	s.dnssec.RemoveKey(zone)
+	s.persistDNSSECKeys()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) persistDNSSECKeys() {
+	keys := s.dnssec.ListKeys()
+	data, _ := json.Marshal(keys)
+	s.db.SetSetting("dnssec_keys", string(data))
+}
+
+func (s *Server) restoreDNSSECKeys() {
+	data := s.db.GetSetting("dnssec_keys")
+	if data == "" {
+		return
+	}
+	var keys []dnsserver.DNSSECKey
+	if err := json.Unmarshal([]byte(data), &keys); err != nil {
+		return
+	}
+	for _, k := range keys {
+		if err := s.dnssec.RestoreKey(k); err != nil {
+			log.Printf("[DNSSEC] Failed to restore key for %s: %v", k.ZoneName, err)
+		}
+	}
 }

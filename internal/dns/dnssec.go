@@ -5,7 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"strings"
@@ -16,13 +18,14 @@ import (
 )
 
 type DNSSECKey struct {
-	ZoneName     string    `json:"zone_name"`
-	Algorithm    string    `json:"algorithm"`
-	KeyTag       uint16    `json:"key_tag"`
-	DSRecord     string    `json:"ds_record"`
-	DNSKEYRecord string    `json:"dnskey_record"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	ZoneName      string    `json:"zone_name"`
+	Algorithm     string    `json:"algorithm"`
+	KeyTag        uint16    `json:"key_tag"`
+	DSRecord      string    `json:"ds_record"`
+	DNSKEYRecord  string    `json:"dnskey_record"`
+	PrivateKeyPEM string    `json:"private_key_pem,omitempty"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type DNSSECManager struct {
@@ -72,14 +75,19 @@ func (dm *DNSSECManager) GenerateKey(zoneName string) (*DNSSECKey, error) {
 	keyTag := dnskey.KeyTag()
 	ds := dnskey.ToDS(mdns.SHA256)
 
+	// Serialize private key to PEM for persistence
+	derBytes, _ := x509.MarshalECPrivateKey(privKey)
+	pemBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: derBytes})
+
 	info := DNSSECKey{
-		ZoneName:     zoneName,
-		Algorithm:    "ECDSAP256SHA256",
-		KeyTag:       keyTag,
-		DSRecord:     ds.String(),
-		DNSKEYRecord: dnskey.String(),
-		Enabled:      true,
-		CreatedAt:    time.Now(),
+		ZoneName:      zoneName,
+		Algorithm:     "ECDSAP256SHA256",
+		KeyTag:        keyTag,
+		DSRecord:      ds.String(),
+		DNSKEYRecord:  dnskey.String(),
+		PrivateKeyPEM: string(pemBlock),
+		Enabled:       true,
+		CreatedAt:     time.Now(),
 	}
 
 	dm.mu.Lock()
@@ -94,12 +102,60 @@ func (dm *DNSSECManager) GenerateKey(zoneName string) (*DNSSECKey, error) {
 	return &info, nil
 }
 
+// RestoreKey restores a DNSSEC key from persisted data (called at startup)
+func (dm *DNSSECManager) RestoreKey(info DNSSECKey) error {
+	zoneName := strings.TrimSuffix(info.ZoneName, ".")
+	if info.PrivateKeyPEM == "" {
+		return fmt.Errorf("no private key for zone %s", zoneName)
+	}
+
+	block, _ := pem.Decode([]byte(info.PrivateKeyPEM))
+	if block == nil {
+		return fmt.Errorf("failed to decode PEM for zone %s", zoneName)
+	}
+	privKey, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse key for zone %s: %w", zoneName, err)
+	}
+
+	dnskey := &mdns.DNSKEY{
+		Hdr: mdns.RR_Header{
+			Name:   mdns.Fqdn(zoneName),
+			Rrtype: mdns.TypeDNSKEY,
+			Class:  mdns.ClassINET,
+			Ttl:    3600,
+		},
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: mdns.ECDSAP256SHA256,
+	}
+	pubBytes := elliptic.Marshal(privKey.Curve, privKey.PublicKey.X, privKey.PublicKey.Y)
+	if len(pubBytes) > 0 && pubBytes[0] == 0x04 {
+		pubBytes = pubBytes[1:]
+	}
+	dnskey.PublicKey = base64.StdEncoding.EncodeToString(pubBytes)
+
+	dm.mu.Lock()
+	dm.keys[zoneName] = &dnssecKeyPair{
+		dnskey:  dnskey,
+		privKey: privKey,
+		info:    info,
+	}
+	dm.mu.Unlock()
+
+	log.Printf("[DNSSEC] Restored key for zone '%s' (tag: %d)", zoneName, info.KeyTag)
+	return nil
+}
+
 func (dm *DNSSECManager) GetKey(zoneName string) *DNSSECKey {
 	zoneName = strings.TrimSuffix(zoneName, ".")
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 	if kp, ok := dm.keys[zoneName]; ok {
-		return &kp.info
+		// Return copy without private key for API responses
+		safe := kp.info
+		safe.PrivateKeyPEM = ""
+		return &safe
 	}
 	return nil
 }
