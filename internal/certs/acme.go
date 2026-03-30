@@ -7,12 +7,16 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,10 +25,12 @@ import (
 
 // ACMEConfig holds ACME/Let's Encrypt configuration
 type ACMEConfig struct {
-	Provider  string `json:"provider"`  // "letsencrypt", "letsencrypt-staging", "zerossl", "custom"
-	Email     string `json:"email"`
-	URL       string `json:"url"`       // custom ACME directory URL
-	Challenge string `json:"challenge"` // "dns-01" or "http-01"
+	Provider       string `json:"provider"`        // "letsencrypt", "letsencrypt-staging", "zerossl", "custom"
+	Email          string `json:"email"`
+	URL            string `json:"url"`             // custom ACME directory URL
+	Challenge      string `json:"challenge"`       // "dns-01" or "http-01"
+	DNSProvider    string `json:"dns_provider"`    // "local" (DNS Supreme zones), "cloudflare"
+	CloudflareToken string `json:"cloudflare_token"` // Cloudflare API token for DNS-01
 }
 
 // ACMEClient handles certificate requests via ACME protocol
@@ -282,4 +288,125 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0644)
+}
+
+// --- Cloudflare DNS-01 solver ---
+
+type cfZoneResult struct {
+	Result []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"result"`
+}
+
+type cfRecordResult struct {
+	Result []struct {
+		ID string `json:"id"`
+	} `json:"result"`
+}
+
+type cfCreateResult struct {
+	Success bool `json:"success"`
+}
+
+func (a *ACMEClient) CloudflareDNSSet(fqdn, value string) error {
+	token := a.cfg.CloudflareToken
+	if token == "" {
+		return fmt.Errorf("Cloudflare API token not configured")
+	}
+
+	// Find zone ID
+	domain := extractDomain(fqdn)
+	zoneID, err := cfGetZoneID(token, domain)
+	if err != nil {
+		return fmt.Errorf("failed to find Cloudflare zone for %s: %w", domain, err)
+	}
+
+	// Create TXT record
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", zoneID)
+	body := fmt.Sprintf(`{"type":"TXT","name":"%s","content":"%s","ttl":120}`, fqdn, value)
+
+	req, _ := http.NewRequest("POST", url, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("Cloudflare API error: %s", string(respBody))
+	}
+
+	log.Printf("[ACME/Cloudflare] Created TXT record for %s", fqdn)
+	return nil
+}
+
+func (a *ACMEClient) CloudflareDNSClear(fqdn string) error {
+	token := a.cfg.CloudflareToken
+	if token == "" {
+		return nil
+	}
+
+	domain := extractDomain(fqdn)
+	zoneID, err := cfGetZoneID(token, domain)
+	if err != nil {
+		return nil // best effort
+	}
+
+	// Find TXT records matching fqdn
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?type=TXT&name=%s", zoneID, fqdn)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var result cfRecordResult
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	for _, r := range result.Result {
+		delURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", zoneID, r.ID)
+		delReq, _ := http.NewRequest("DELETE", delURL, nil)
+		delReq.Header.Set("Authorization", "Bearer "+token)
+		http.DefaultClient.Do(delReq)
+	}
+
+	log.Printf("[ACME/Cloudflare] Cleared TXT records for %s", fqdn)
+	return nil
+}
+
+func cfGetZoneID(token, domain string) (string, error) {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones?name=%s", domain)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result cfZoneResult
+	json.NewDecoder(resp.Body).Decode(&result)
+	if len(result.Result) == 0 {
+		return "", fmt.Errorf("zone not found: %s", domain)
+	}
+	return result.Result[0].ID, nil
+}
+
+// extractDomain gets the root domain from an FQDN (e.g. _acme-challenge.example.com -> example.com)
+func extractDomain(fqdn string) string {
+	fqdn = strings.TrimSuffix(fqdn, ".")
+	parts := strings.Split(fqdn, ".")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "." + parts[len(parts)-1]
+	}
+	return fqdn
 }

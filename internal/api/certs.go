@@ -166,9 +166,30 @@ func (s *Server) uploadCert(c *gin.Context) {
 }
 
 func (s *Server) exportCert(c *gin.Context) {
+	format := c.Query("format")
+	domain := c.Query("domain")
+
 	certFile := os.Getenv("TLS_CERT_FILE")
 	if certFile == "" {
 		certFile = "/app/certs/server.crt"
+	}
+	// Domain-specific cert file
+	if domain != "" {
+		domainCert := "/app/certs/" + domain + ".crt"
+		if _, err := os.Stat(domainCert); err == nil {
+			certFile = domainCert
+		}
+	}
+
+	// Return cert info as JSON
+	if format == "info" {
+		info, err := readCertInfo(certFile)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "No certificate found"})
+			return
+		}
+		c.JSON(http.StatusOK, info)
+		return
 	}
 
 	data, err := os.ReadFile(certFile)
@@ -177,15 +198,12 @@ func (s *Server) exportCert(c *gin.Context) {
 		return
 	}
 
-	format := c.Query("format")
-	domain := c.Query("domain")
 	filename := "dns-supreme-ca"
 	if domain != "" {
 		filename = domain
 	}
 
 	if format == "der" {
-		// Convert PEM to DER
 		block, _ := pem.Decode(data)
 		if block == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse certificate"})

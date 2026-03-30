@@ -359,6 +359,17 @@
               <option value="http-01">HTTP-01 (requires port 80)</option>
             </select>
           </div>
+          <div class="field" v-if="acmeChallenge === 'dns-01'">
+            <label>DNS Provider</label>
+            <select v-model="acmeDnsProvider">
+              <option value="local">DNS Supreme (local zones)</option>
+              <option value="cloudflare">Cloudflare</option>
+            </select>
+          </div>
+          <div class="field" v-if="acmeDnsProvider === 'cloudflare'">
+            <label>Cloudflare API Token</label>
+            <input v-model="acmeCloudflareToken" type="password" placeholder="API token with Zone:DNS:Edit permission" />
+          </div>
           <div class="field">
             <label>Auto-Renewal</label>
             <select v-model="acmeAutoRenew">
@@ -1259,6 +1270,8 @@ const certMode = ref('self-signed')
 const acmeDomain = ref('')
 const acmeAutoRenew = ref(true)
 const acmeStatus = ref<any>(null)
+const acmeDnsProvider = ref('local')
+const acmeCloudflareToken = ref('')
 const acmeProvider = ref('letsencrypt')
 const acmeEmail = ref('')
 const acmeUrl = ref('')

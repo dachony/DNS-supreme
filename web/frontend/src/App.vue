@@ -41,14 +41,18 @@
       </div>
     </nav>
     <main class="content">
-      <div v-if="needsRestart" class="restart-banner">
-        <span>Configuration changed — TLS reload required to apply new certificates.</span>
-        <button @click="restartServer" :disabled="restarting" class="restart-banner-btn">
-          {{ restarting ? 'Reloading...' : 'Apply Now' }}
-        </button>
-        <button @click="needsRestart = false" class="restart-banner-dismiss">&times;</button>
-      </div>
       <router-view />
+
+      <!-- Floating toast for TLS reload -->
+      <Transition name="toast">
+      <div v-if="needsRestart" class="restart-toast">
+        <span>TLS reload required to apply new certificates.</span>
+        <button @click="restartServer" :disabled="restarting" class="restart-toast-btn">
+          {{ restarting ? 'Applying...' : 'Apply Now' }}
+        </button>
+        <button @click="needsRestart = false" class="restart-toast-dismiss">&times;</button>
+      </div>
+      </Transition>
     </main>
   </div>
   <router-view v-else />
@@ -414,25 +418,29 @@ table tbody tr:hover { background: var(--bg-hover) !important; }
 .mode-card.active { border-color: var(--accent) !important; }
 
 /* Restart banner */
-.restart-banner {
-  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-  background: linear-gradient(135deg, rgba(251,191,36,0.15), rgba(249,115,22,0.1));
-  border: 1px solid rgba(251,191,36,0.3); border-radius: 10px;
-  margin-bottom: 16px; color: #fbbf24; font-size: 0.88rem;
+.restart-toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 200;
+  display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+  background: #1e293b; border: 1px solid rgba(251,191,36,0.4); border-radius: 12px;
+  color: #fbbf24; font-size: 0.88rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 }
-.restart-banner span { flex: 1; }
-.restart-banner-btn {
+.restart-toast span { flex: 1; }
+.restart-toast-btn {
   padding: 6px 16px; background: #f59e0b; color: #000; border: none;
   border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 600;
   transition: opacity 0.15s; white-space: nowrap;
 }
-.restart-banner-btn:hover { opacity: 0.85; }
-.restart-banner-btn:disabled { opacity: 0.5; cursor: wait; }
-.restart-banner-dismiss {
+.restart-toast-btn:hover { opacity: 0.85; }
+.restart-toast-btn:disabled { opacity: 0.5; cursor: wait; }
+.restart-toast-dismiss {
   background: none; border: none; color: #fbbf24; cursor: pointer;
   font-size: 1.2rem; line-height: 1; opacity: 0.6;
 }
-.restart-banner-dismiss:hover { opacity: 1; }
+.restart-toast-dismiss:hover { opacity: 1; }
+.toast-enter-active { animation: toast-in 0.3s ease; }
+.toast-leave-active { animation: toast-in 0.2s ease reverse; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
 /* Confirm modal */
 .confirm-overlay {

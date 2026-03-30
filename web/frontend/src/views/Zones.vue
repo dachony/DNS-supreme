@@ -168,6 +168,43 @@
         </table>
       </div>
 
+      <!-- TLS Certificate for this zone -->
+      <div class="section" v-if="!selectedZone.name.includes('arpa')">
+        <div class="section-header-row">
+          <h3>TLS Certificate</h3>
+          <span v-if="zoneCertInfo" class="cert-status-badge" :class="zoneCertInfo.status">{{ zoneCertInfo.status }}</span>
+          <span v-else class="cert-status-badge none">No certificate</span>
+        </div>
+
+        <div v-if="zoneCertInfo" class="zone-cert-details">
+          <div class="detail-row">
+            <span class="detail-label">Subject</span>
+            <span class="detail-value">{{ zoneCertInfo.subject }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Issuer</span>
+            <span class="detail-value">{{ zoneCertInfo.issuer }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Expires</span>
+            <span class="detail-value">{{ zoneCertInfo.not_after ? new Date(zoneCertInfo.not_after).toLocaleDateString() : '-' }}</span>
+          </div>
+          <div class="detail-row" v-if="zoneCertInfo.dns_names?.length">
+            <span class="detail-label">DNS Names</span>
+            <span class="detail-value">{{ zoneCertInfo.dns_names.join(', ') }}</span>
+          </div>
+        </div>
+
+        <div class="zone-cert-actions">
+          <button @click="generateZoneSelfSigned" class="btn-secondary">Generate Self-Signed</button>
+          <button @click="requestZoneAcmeCert" class="btn-primary" :disabled="!acmeConfigured">
+            Request Let's Encrypt
+          </button>
+          <span v-if="!acmeConfigured" class="hint-text">Configure ACME in Settings &gt; Certificates first</span>
+        </div>
+        <div v-if="zoneCertMsg" class="msg-success" style="margin-top:8px">{{ zoneCertMsg }}</div>
+      </div>
+
       <!-- Zone Infrastructure (SOA, NS, DNSSEC — bottom, collapsible) -->
       <div class="section section-infra">
         <div class="section-header-row">
@@ -344,6 +381,7 @@ async function selectZone(z: any) {
     newRecord.value.type = 'PTR'
   } else {
     newRecord.value.type = 'A'
+    loadZoneCert(data.zone.name)
   }
 }
 
@@ -410,6 +448,51 @@ function createSubdomainZone() {
   newZone.value.name = 'sub.' + parent
 }
 
+// --- Zone Certificate ---
+const zoneCertInfo = ref<any>(null)
+const zoneCertMsg = ref('')
+const acmeConfigured = ref(false)
+
+async function loadZoneCert(zoneName: string) {
+  zoneCertInfo.value = null
+  try {
+    const { data } = await axios.get(`/api/certs/export?format=info&domain=${encodeURIComponent(zoneName)}`)
+    if (data?.subject) {
+      zoneCertInfo.value = { ...data, status: 'active' }
+    }
+  } catch {}
+  // Check if ACME is configured
+  try {
+    const { data } = await axios.get('/api/acme/config')
+    acmeConfigured.value = !!(data?.email)
+  } catch {}
+}
+
+async function generateZoneSelfSigned() {
+  zoneCertMsg.value = ''
+  try {
+    const { data } = await axios.post('/api/certs/generate', { domain: selectedZone.value.name })
+    zoneCertMsg.value = data.message || 'Certificate generated'
+    loadZoneCert(selectedZone.value.name)
+    setTimeout(() => zoneCertMsg.value = '', 5000)
+  } catch (e: any) {
+    zoneCertMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+  }
+}
+
+async function requestZoneAcmeCert() {
+  zoneCertMsg.value = 'Requesting certificate from Let\'s Encrypt...'
+  try {
+    const { data } = await axios.post('/api/acme/request', { domain: selectedZone.value.name })
+    zoneCertMsg.value = data.message || 'Certificate request submitted. This may take a moment.'
+    // Poll for completion
+    setTimeout(() => loadZoneCert(selectedZone.value.name), 15000)
+    setTimeout(() => zoneCertMsg.value = '', 20000)
+  } catch (e: any) {
+    zoneCertMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+  }
+}
+
 function autoGenerateReverse() {
   const parts = reverseSubnet.value.trim().split('.').filter(p => p !== '').reverse()
   if (parts.length > 0) {
@@ -457,6 +540,16 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
 .reverse-preview {
   color: var(--accent); font-family: monospace; font-size: 0.82rem; white-space: nowrap;
 }
+
+/* Zone cert */
+.zone-cert-details { background: var(--bg-input); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.zone-cert-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cert-status-badge {
+  padding: 3px 10px; border-radius: 12px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+}
+.cert-status-badge.active { background: rgba(34,197,94,0.15); color: #22c55e; }
+.cert-status-badge.none { background: rgba(100,116,139,0.15); color: #94a3b8; }
+.hint-text { color: var(--text-dim); font-size: 0.78rem; font-style: italic; }
 
 /* Infrastructure section */
 .section-infra { opacity: 0.9; }
