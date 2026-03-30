@@ -42,9 +42,9 @@
     </nav>
     <main class="content">
       <div v-if="needsRestart" class="restart-banner">
-        <span>Configuration changed — restart required to apply.</span>
+        <span>Configuration changed — TLS reload required to apply new certificates.</span>
         <button @click="restartServer" :disabled="restarting" class="restart-banner-btn">
-          {{ restarting ? 'Restarting...' : 'Restart Now' }}
+          {{ restarting ? 'Reloading...' : 'Apply Now' }}
         </button>
         <button @click="needsRestart = false" class="restart-banner-dismiss">&times;</button>
       </div>

@@ -43,23 +43,98 @@ func (s *Server) getCerts(c *gin.Context) {
 	c.JSON(http.StatusOK, info)
 }
 
+type generateCertReq struct {
+	Domain             string   `json:"domain"`
+	CommonName         string   `json:"common_name"`
+	Organization       string   `json:"organization"`
+	OrganizationalUnit string   `json:"organizational_unit"`
+	Country            string   `json:"country"`
+	State              string   `json:"state"`
+	Locality           string   `json:"locality"`
+	DNSNames           []string `json:"dns_names"`
+	ValidityDays       int      `json:"validity_days"`
+}
+
 func (s *Server) generateSelfSigned(c *gin.Context) {
+	os.MkdirAll("/app/certs", 0755)
+
+	var req generateCertReq
+	c.ShouldBindJSON(&req)
+
+	// Zone-specific cert
+	if req.Domain != "" {
+		certFile := "/app/certs/" + req.Domain + ".crt"
+		keyFile := "/app/certs/" + req.Domain + ".key"
+		cr := &certs.CertRequest{
+			CommonName: req.Domain,
+			DNSNames:   []string{req.Domain, "*." + req.Domain},
+			ValidityDays: 365,
+		}
+		if err := certs.GenerateAndSave(certFile, keyFile, cr); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"message": "Certificate generated for " + req.Domain + ". Apply to reload TLS.",
+		})
+		return
+	}
+
+	// Server cert
 	certFile := "/app/certs/server.crt"
 	keyFile := "/app/certs/server.key"
 
-	os.MkdirAll("/app/certs", 0755)
+	cr := &certs.CertRequest{
+		CommonName:         req.CommonName,
+		Organization:       req.Organization,
+		OrganizationalUnit: req.OrganizationalUnit,
+		Country:            req.Country,
+		State:              req.State,
+		Locality:           req.Locality,
+		DNSNames:           req.DNSNames,
+		ValidityDays:       req.ValidityDays,
+	}
+	if cr.CommonName == "" {
+		cr.CommonName = "dns-supreme"
+	}
 
-	if err := certs.GenerateAndSave(certFile, keyFile); err != nil {
+	if err := certs.GenerateAndSave(certFile, keyFile, cr); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if data, err := json.Marshal(cr); err == nil {
+		s.db.SetSetting("cert_params", string(data))
 	}
 
 	info, _ := readCertInfo(certFile)
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "ok",
-		"message":   "Self-signed certificate generated. Restart to apply.",
+		"message":   "Certificate generated. Apply to reload TLS.",
 		"cert_info": info,
 	})
+}
+
+func (s *Server) getCertZones(c *gin.Context) {
+	entries, _ := os.ReadDir("/app/certs")
+	zones := make([]string, 0)
+	for _, e := range entries {
+		name := e.Name()
+		if name != "server.crt" && name != "server.key" && len(name) > 4 && name[len(name)-4:] == ".crt" {
+			zones = append(zones, name[:len(name)-4])
+		}
+	}
+	c.JSON(http.StatusOK, zones)
+}
+
+func (s *Server) deleteCert(c *gin.Context) {
+	certFile := "/app/certs/server.crt"
+	keyFile := "/app/certs/server.key"
+	os.Remove(certFile)
+	os.Remove(keyFile)
+	log.Println("[Certs] Server certificate deleted")
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Certificate deleted"})
 }
 
 func (s *Server) uploadCert(c *gin.Context) {

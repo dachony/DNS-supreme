@@ -197,7 +197,9 @@ func (s *Server) setupRoutes() {
 
 		// Certificate management
 		protected.GET("/certs", s.getCerts)
+		protected.GET("/certs/zones", s.getCertZones)
 		protected.POST("/certs/generate", s.generateSelfSigned)
+		protected.DELETE("/certs", s.deleteCert)
 		protected.POST("/certs/upload", s.uploadCert)
 		protected.GET("/certs/export", s.exportCert)
 		protected.GET("/acme/config", s.getACMEConfig)

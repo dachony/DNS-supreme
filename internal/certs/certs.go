@@ -15,6 +15,18 @@ import (
 	"time"
 )
 
+// CertRequest contains all fields for generating a self-signed certificate
+type CertRequest struct {
+	CommonName         string   `json:"common_name"`
+	Organization       string   `json:"organization"`
+	OrganizationalUnit string   `json:"organizational_unit"`
+	Country            string   `json:"country"`
+	State              string   `json:"state"`
+	Locality           string   `json:"locality"`
+	DNSNames           []string `json:"dns_names"`
+	ValidityDays       int      `json:"validity_days"`
+}
+
 func LoadOrGenerateTLS(certFile, keyFile string) (*tls.Config, error) {
 	// Try to load existing cert
 	if certFile != "" && keyFile != "" {
@@ -78,7 +90,7 @@ func generateSelfSigned() (tls.Certificate, error) {
 	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
-func GenerateAndSave(certFile, keyFile string) error {
+func GenerateAndSave(certFile, keyFile string, req *CertRequest) error {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return err
@@ -86,24 +98,58 @@ func GenerateAndSave(certFile, keyFile string) error {
 
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 
+	// Build subject from request
+	subject := pkix.Name{
+		CommonName: "dns-supreme",
+	}
+	if req != nil {
+		if req.CommonName != "" {
+			subject.CommonName = req.CommonName
+		}
+		if req.Organization != "" {
+			subject.Organization = []string{req.Organization}
+		}
+		if req.OrganizationalUnit != "" {
+			subject.OrganizationalUnit = []string{req.OrganizationalUnit}
+		}
+		if req.Country != "" {
+			subject.Country = []string{req.Country}
+		}
+		if req.State != "" {
+			subject.Province = []string{req.State}
+		}
+		if req.Locality != "" {
+			subject.Locality = []string{req.Locality}
+		}
+	}
+
+	validityDays := 365
+	if req != nil && req.ValidityDays > 0 && req.ValidityDays <= 3650 {
+		validityDays = req.ValidityDays
+	}
+
+	dnsNames := []string{"localhost", subject.CommonName}
+	if req != nil && len(req.DNSNames) > 0 {
+		dnsNames = append(dnsNames, req.DNSNames...)
+	}
+
 	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject: pkix.Name{
-			Organization: []string{"DNS-supreme"},
-			CommonName:   "dns-supreme",
-		},
+		SerialNumber:          serial,
+		Subject:               subject,
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		NotAfter:              time.Now().Add(time.Duration(validityDays) * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{"localhost", "dns-supreme"},
+		DNSNames:              dnsNames,
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
 		return err
 	}
+
+	os.MkdirAll(fmt.Sprintf("%s", certFile[:len(certFile)-len("/server.crt")]), 0755)
 
 	certOut, err := os.Create(certFile)
 	if err != nil {
@@ -116,12 +162,13 @@ func GenerateAndSave(certFile, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	keyOut, err := os.Create(keyFile)
+	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
 	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	keyOut.Close()
 
+	log.Printf("[Certs] Self-signed certificate generated: CN=%s, validity=%d days, SANs=%v", subject.CommonName, validityDays, dnsNames)
 	return nil
 }

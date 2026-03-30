@@ -237,19 +237,33 @@
 
     <!-- TAB: Certificates -->
     <div v-if="activeTab === 'certs'" class="tab-content">
-      <p class="section-desc">
-        TLS certificates for DNS-over-TLS, DNS-over-HTTPS, and HTTPS block page.
-      </p>
+      <div class="certs-split">
+      <div class="certs-left">
 
-      <!-- Global / Server cert -->
+      <!-- Certificate Mode Selector -->
       <div class="subsection">
         <h4>Server Certificate</h4>
-        <p class="section-desc">Default certificate used for all protocols. Applied to all zones unless overridden.</p>
+        <div class="cert-mode-toggle">
+          <button :class="{ active: certMode === 'self-signed' }" @click="certMode = 'self-signed'">Self-Signed</button>
+          <button :class="{ active: certMode === 'acme' }" @click="certMode = 'acme'">Let's Encrypt / ACME</button>
+          <button :class="{ active: certMode === 'upload' }" @click="certMode = 'upload'">Upload Custom</button>
+        </div>
 
+        <!-- Active cert badge -->
+        <div class="cert-active-badge" v-if="certInfo">
+          <span class="cert-active-type">{{ certInfo.issuer?.includes('Let') ? 'ACME' : certInfo.subject === certInfo.issuer ? 'Self-Signed' : 'Custom' }}</span>
+          in use
+        </div>
+
+      <!-- Current cert info (always visible) -->
       <div v-if="certInfo" class="cert-info">
+        <div class="cert-status-bar" :class="certExpiryClass">
+          <span class="cert-status-icon">{{ certExpired ? '!!' : certExpiryDays <= 30 ? '!' : 'OK' }}</span>
+          <span>{{ certExpired ? 'EXPIRED' : certExpiryDays <= 30 ? 'Expiring soon (' + certExpiryDays + ' days)' : 'Valid (' + certExpiryDays + ' days remaining)' }}</span>
+        </div>
         <div class="detail-row">
-          <span class="detail-label">Status</span>
-          <span class="detail-value">{{ certInfo.subject || certInfo.status || 'Auto-generated self-signed' }}</span>
+          <span class="detail-label">Subject</span>
+          <span class="detail-value">{{ certInfo.subject || 'Auto-generated self-signed' }}</span>
         </div>
         <div class="detail-row" v-if="certInfo.issuer">
           <span class="detail-label">Issuer</span>
@@ -265,14 +279,137 @@
         </div>
       </div>
 
-      <div class="section-actions">
-        <button @click="generateCert" class="btn-primary">Generate Self-Signed</button>
-        <label class="btn-secondary upload-btn">
-          Upload Certificate
-          <input type="file" ref="certFileInput" @change="handleCertUpload" style="display:none" accept=".pem,.crt" />
-        </label>
+      <!-- MODE: Self-Signed -->
+      <div v-if="certMode === 'self-signed'" class="cert-mode-panel">
+        <div class="settings-grid">
+          <div class="field">
+            <label>Common Name (hostname) *</label>
+            <input v-model="certReq.common_name" :placeholder="hostname || 'dns-supreme'" />
+          </div>
+          <div class="field">
+            <label>Organization</label>
+            <input v-model="certReq.organization" placeholder="My Company" />
+          </div>
+          <div class="field">
+            <label>Organizational Unit</label>
+            <input v-model="certReq.organizational_unit" placeholder="IT Department" />
+          </div>
+          <div class="field">
+            <label>Country (2-letter code)</label>
+            <input v-model="certReq.country" placeholder="US" maxlength="2" style="text-transform:uppercase" />
+          </div>
+          <div class="field">
+            <label>State / Province</label>
+            <input v-model="certReq.state" placeholder="California" />
+          </div>
+          <div class="field">
+            <label>City / Locality</label>
+            <input v-model="certReq.locality" placeholder="San Francisco" />
+          </div>
+          <div class="field">
+            <label>Additional DNS Names (comma-separated)</label>
+            <input v-model="certDnsNamesStr" placeholder="dns.example.com, *.example.com" />
+          </div>
+          <div class="field">
+            <label>Validity Period</label>
+            <select v-model="certReq.validity_days">
+              <option :value="365">1 year</option>
+              <option :value="730">2 years</option>
+              <option :value="1095">3 years</option>
+              <option :value="1825">5 years</option>
+              <option :value="3650">10 years</option>
+            </select>
+          </div>
+        </div>
+        <div class="section-actions" style="margin-top:12px">
+          <button @click="generateCert" class="btn-primary">Generate Certificate</button>
+          <button v-if="certInfo" @click="reissueCert" class="btn-secondary">Re-issue</button>
+          <button v-if="certInfo" @click="deleteCert" class="btn-danger-outline">Delete</button>
+        </div>
       </div>
-      <div v-if="certMsg" class="msg-success">{{ certMsg }}</div>
+
+      <!-- MODE: ACME / Let's Encrypt -->
+      <div v-if="certMode === 'acme'" class="cert-mode-panel">
+        <div class="settings-grid" style="margin-bottom:12px">
+          <div class="field">
+            <label>ACME Provider</label>
+            <select v-model="acmeProvider">
+              <option value="letsencrypt">Let's Encrypt</option>
+              <option value="letsencrypt-staging">Let's Encrypt (Staging)</option>
+              <option value="zerossl">ZeroSSL</option>
+              <option value="custom">Custom ACME URL</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Email (required) *</label>
+            <input v-model="acmeEmail" placeholder="admin@example.com" />
+          </div>
+          <div class="field" v-if="acmeProvider === 'custom'">
+            <label>ACME Directory URL</label>
+            <input v-model="acmeUrl" placeholder="https://acme.provider.com/directory" />
+          </div>
+          <div class="field">
+            <label>Domain</label>
+            <input v-model="acmeDomain" placeholder="dns.example.com" />
+          </div>
+          <div class="field">
+            <label>Challenge Type</label>
+            <select v-model="acmeChallenge">
+              <option value="dns-01">DNS-01 (recommended)</option>
+              <option value="http-01">HTTP-01 (requires port 80)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Auto-Renewal</label>
+            <select v-model="acmeAutoRenew">
+              <option :value="true">Enabled (renew 30 days before expiry)</option>
+              <option :value="false">Disabled (manual renewal only)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ACME Status -->
+        <div class="acme-status" v-if="acmeStatus">
+          <div class="detail-row">
+            <span class="detail-label">Status</span>
+            <span class="detail-value">
+              <span class="acme-status-badge" :class="acmeStatus.status">{{ acmeStatus.status }}</span>
+            </span>
+          </div>
+          <div class="detail-row" v-if="acmeStatus.domain">
+            <span class="detail-label">Domain</span>
+            <span class="detail-value">{{ acmeStatus.domain }}</span>
+          </div>
+          <div class="detail-row" v-if="acmeStatus.issued_at">
+            <span class="detail-label">Issued</span>
+            <span class="detail-value">{{ formatDate(acmeStatus.issued_at) }}</span>
+          </div>
+          <div class="detail-row" v-if="acmeStatus.next_renewal">
+            <span class="detail-label">Next Renewal</span>
+            <span class="detail-value">{{ formatDate(acmeStatus.next_renewal) }}</span>
+          </div>
+        </div>
+
+        <div class="section-actions" style="margin-top:12px">
+          <button @click="saveAcme" class="btn-primary">Save Settings</button>
+          <button @click="requestAcmeCert" :disabled="!acmeEmail || !acmeDomain" class="btn-secondary">Request Certificate Now</button>
+        </div>
+        <div v-if="acmeMsg" class="msg-success">{{ acmeMsg }}</div>
+      </div>
+
+      <!-- MODE: Upload Custom -->
+      <div v-if="certMode === 'upload'" class="cert-mode-panel">
+        <p class="section-desc">Upload a certificate and private key from an external CA.</p>
+        <div class="section-actions">
+          <label class="btn-primary upload-btn">
+            Select Certificate File (.pem / .crt)
+            <input type="file" ref="certFileInput" @change="handleCertUpload" style="display:none" accept=".pem,.crt" />
+          </label>
+          <button v-if="certInfo" @click="deleteCert" class="btn-danger-outline">Delete</button>
+        </div>
+      </div>
+
+      <div v-if="certMsg" class="msg-success" style="margin-top:8px">{{ certMsg }}</div>
 
       <!-- Cert key upload modal -->
       <div v-if="certUploadShow" class="modal-overlay" @click.self="certUploadShow = false">
@@ -286,6 +423,21 @@
           <div class="section-actions" style="margin-top:12px">
             <button @click="submitCertUpload" :disabled="!certUploadKeyText" class="btn-primary">Upload</button>
             <button @click="certUploadShow = false" class="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Delete confirmation modal (type DELETE) -->
+      <div v-if="certDeleteShow" class="modal-overlay" @click.self="certDeleteShow = false">
+        <div class="edit-modal">
+          <h3>Confirm Certificate Deletion</h3>
+          <p class="section-desc">This action is irreversible. Type <strong>DELETE</strong> below to confirm.</p>
+          <div class="field">
+            <input v-model="certDeleteConfirmText" placeholder="Type DELETE to confirm" autocomplete="off" />
+          </div>
+          <div class="section-actions" style="margin-top:12px">
+            <button @click="confirmDeleteCert" :disabled="certDeleteConfirmText !== 'DELETE'" class="btn-danger">Delete Certificate</button>
+            <button @click="certDeleteShow = false" class="btn-secondary">Cancel</button>
           </div>
         </div>
       </div>
@@ -334,43 +486,98 @@
         <div v-else class="empty-small">No zones configured. Create zones first in DNS Zones.</div>
       </div>
 
-      <!-- ACME / Let's Encrypt -->
-      <div class="subsection" style="margin-top:20px">
-        <h4>Automatic Certificates (ACME)</h4>
-        <p class="section-desc">Automatically obtain and renew trusted certificates from Let's Encrypt or another ACME provider. Requires port 80 or DNS-01 challenge access.</p>
-        <div class="settings-grid" style="margin-bottom:12px">
-          <div class="field">
-            <label>ACME Provider</label>
-            <select v-model="acmeProvider">
-              <option value="letsencrypt">Let's Encrypt</option>
-              <option value="letsencrypt-staging">Let's Encrypt (Staging)</option>
-              <option value="zerossl">ZeroSSL</option>
-              <option value="custom">Custom ACME URL</option>
-            </select>
+      </div><!-- end certs-left -->
+
+      <div class="certs-right">
+        <div class="how-it-works">
+          <h4>How It Works</h4>
+
+          <div class="hiw-section" v-if="certMode === 'self-signed'">
+            <h5>Self-Signed Certificate</h5>
+            <p>Creates a certificate signed by your own server. Encrypts all traffic but browsers will show a "not trusted" warning.</p>
+            <p><strong>When to use:</strong></p>
+            <ul>
+              <li>Internal or private network DNS</li>
+              <li>Development and testing</li>
+              <li>DNS-over-TLS — clients can pin the cert</li>
+            </ul>
+            <p><strong>How to set up:</strong></p>
+            <ol>
+              <li>Fill in your server hostname as Common Name</li>
+              <li>Add organization details (optional but recommended)</li>
+              <li>Add any extra DNS names the server responds to</li>
+              <li>Choose validity period</li>
+              <li>Click "Generate Certificate"</li>
+              <li>Click "Apply Now" in the banner to reload TLS</li>
+            </ol>
+            <p><strong>To trust on clients:</strong> Export the certificate below and install it as a trusted root CA on each device (see install hints).</p>
           </div>
-          <div class="field">
-            <label>Email (required for ACME)</label>
-            <input v-model="acmeEmail" placeholder="admin@example.com" />
+
+          <div class="hiw-section" v-if="certMode === 'acme'">
+            <h5>Let's Encrypt / ACME</h5>
+            <p>Obtains a <strong>free, trusted certificate</strong> from Let's Encrypt that all browsers and devices accept automatically. No manual install needed on clients.</p>
+            <p><strong>Requirements:</strong></p>
+            <ul>
+              <li>A real domain name (not .local)</li>
+              <li>Domain's DNS must point to this server's IP</li>
+              <li>A DNS zone for the domain in DNS Zones</li>
+            </ul>
+            <p><strong>How to set up:</strong></p>
+            <ol>
+              <li>Enter your email address (Let's Encrypt requires it)</li>
+              <li>Enter the domain name for the certificate</li>
+              <li>Select <strong>DNS-01</strong> challenge (recommended)</li>
+              <li>Click "Save Settings"</li>
+              <li>Click "Request Certificate Now"</li>
+              <li>DNS Supreme auto-creates the TXT record needed</li>
+              <li>Certificate is issued in seconds</li>
+            </ol>
+            <p><strong>DNS-01 vs HTTP-01:</strong></p>
+            <ul>
+              <li><strong>DNS-01</strong> — Recommended. DNS Supreme creates _acme-challenge TXT record automatically. Works even behind firewall. Supports wildcards.</li>
+              <li><strong>HTTP-01</strong> — Requires port 80 accessible from internet. No wildcard support.</li>
+            </ul>
+            <p><strong>Auto-renewal:</strong> When enabled, the certificate renews automatically 30 days before expiry.</p>
+            <p><strong>Note:</strong> Let's Encrypt issues certificates per domain — each domain needs its own request. Wildcard certs (*.example.com) are included automatically with DNS-01.</p>
           </div>
-          <div class="field" v-if="acmeProvider === 'custom'">
-            <label>ACME Directory URL</label>
-            <input v-model="acmeUrl" placeholder="https://acme.provider.com/directory" />
+
+          <div class="hiw-section" v-if="certMode === 'upload'">
+            <h5>Upload Custom Certificate</h5>
+            <p>Upload a certificate from any Certificate Authority (DigiCert, Comodo, GoDaddy, etc.)</p>
+            <p><strong>How to set up:</strong></p>
+            <ol>
+              <li>Click "Select Certificate File"</li>
+              <li>Choose your .pem or .crt file</li>
+              <li>Paste the private key (PEM format)</li>
+              <li>Click Upload, then "Apply Now"</li>
+            </ol>
+            <p><strong>Supported formats:</strong> PEM-encoded certificate (.pem, .crt) and PEM-encoded private key.</p>
           </div>
-          <div class="field">
-            <label>Challenge Type</label>
-            <select v-model="acmeChallenge">
-              <option value="dns-01">DNS-01 (recommended — uses DNS Supreme as solver)</option>
-              <option value="http-01">HTTP-01 (requires port 80 access)</option>
-            </select>
+
+          <div class="hiw-section">
+            <h5>What the certificate protects</h5>
+            <ul>
+              <li><strong>DoT</strong> (port 853) — DNS-over-TLS encryption</li>
+              <li><strong>DoH</strong> (port 443) — DNS-over-HTTPS encryption</li>
+              <li><strong>DoQ</strong> (port 853/UDP) — DNS-over-QUIC encryption</li>
+              <li><strong>Block Page</strong> (port 443) — HTTPS block page</li>
+              <li><strong>Web Panel</strong> — if HTTPS is enabled for management</li>
+            </ul>
+          </div>
+
+          <div class="hiw-section">
+            <h5>Zone Certificates</h5>
+            <p>Each DNS zone can have its own certificate. Useful when:</p>
+            <ul>
+              <li>You host multiple domains</li>
+              <li>Different domains need different certs</li>
+              <li>DoH clients connect to specific domain names</li>
+            </ul>
+            <p>Generate a zone cert below — it creates a self-signed cert with the zone domain and wildcard (*.domain) as SANs.</p>
           </div>
         </div>
-        <p class="section-desc" style="font-size:0.75rem">DNS-01 is recommended because DNS Supreme can automatically solve the challenge using its own zones. HTTP-01 requires port 80 to be accessible from the internet.</p>
-        <div class="section-actions">
-          <button @click="saveAcme" class="btn-primary">Save ACME Settings</button>
-          <button @click="requestAcmeCert" :disabled="!acmeEmail" class="btn-secondary">Request Certificate Now</button>
-        </div>
-        <div v-if="acmeMsg" class="msg-success">{{ acmeMsg }}</div>
-      </div>
+      </div><!-- end certs-right -->
+      </div><!-- end certs-split -->
     </div>
 
     <!-- TAB: Block Page -->
@@ -1028,6 +1235,30 @@ async function testMail() {
 
 const certInfo = ref<any>(null)
 const certMsg = ref('')
+const certReq = ref({
+  common_name: '', organization: '', organizational_unit: '',
+  country: '', state: '', locality: '', dns_names: [] as string[], validity_days: 365,
+})
+const certDnsNamesStr = ref('')
+const certDeleteConfirmText = ref('')
+const certDeleteShow = ref(false)
+
+const certExpiryDays = computed(() => {
+  if (!certInfo.value?.not_after) return 999
+  const diff = new Date(certInfo.value.not_after).getTime() - Date.now()
+  return Math.floor(diff / (1000 * 60 * 60 * 24))
+})
+const certExpired = computed(() => certExpiryDays.value <= 0)
+const certExpiryClass = computed(() => {
+  if (certExpired.value) return 'expired'
+  if (certExpiryDays.value <= 30) return 'warning'
+  return 'valid'
+})
+
+const certMode = ref('self-signed')
+const acmeDomain = ref('')
+const acmeAutoRenew = ref(true)
+const acmeStatus = ref<any>(null)
 const acmeProvider = ref('letsencrypt')
 const acmeEmail = ref('')
 const acmeUrl = ref('')
@@ -1091,7 +1322,15 @@ const certZones = ref<any[]>([])
 async function loadCertZones() {
   try {
     const { data } = await axios.get('/api/zones')
-    certZones.value = (data || []).map((z: any) => ({ name: z.name, has_cert: false }))
+    const zones = (data || []).map((z: any) => ({ name: z.name, has_cert: false }))
+    // Check which zones have certs
+    try {
+      const { data: certData } = await axios.get('/api/certs/zones')
+      for (const z of zones) {
+        z.has_cert = certData?.includes(z.name)
+      }
+    } catch {}
+    certZones.value = zones
   } catch {}
 }
 
@@ -1100,7 +1339,9 @@ async function generateZoneCert(zoneName: string) {
   try {
     const { data } = await axios.post('/api/certs/generate', { domain: zoneName })
     certMsg.value = data.message || `Certificate generated for ${zoneName}`
-    loadCertZones()
+    requestRestart()
+    setTimeout(() => loadCertZones(), 1000)
+    setTimeout(() => certMsg.value = '', 5000)
   } catch (e: any) {
     certMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
   }
@@ -1327,10 +1568,40 @@ function copyText(text: string) {
 // --- Certificates ---
 async function generateCert() {
   certMsg.value = ''
-  const { data } = await axios.post('/api/certs/generate')
+  const req = { ...certReq.value }
+  if (certDnsNamesStr.value) {
+    req.dns_names = certDnsNamesStr.value.split(',').map((s: string) => s.trim()).filter(Boolean)
+  }
+  if (!req.common_name) req.common_name = hostname.value || 'dns-supreme'
+  const { data } = await axios.post('/api/certs/generate', req)
   certMsg.value = data.message
   loadAll()
   requestRestart()
+  setTimeout(() => certMsg.value = '', 5000)
+}
+
+async function reissueCert() {
+  if (!await confirm({ title: 'Re-issue Certificate', message: 'Generate a new certificate with the same parameters? The current certificate will be replaced.', confirmText: 'Re-issue', danger: false })) return
+  generateCert()
+}
+
+async function deleteCert() {
+  if (!await confirm({ title: 'Delete Certificate', message: 'Are you sure you want to delete the server certificate? All encrypted protocols (DoT, DoH, DoQ) will stop working until a new certificate is generated.', confirmText: 'Continue', danger: true })) return
+  // Second confirmation: type DELETE
+  certDeleteShow.value = true
+  certDeleteConfirmText.value = ''
+}
+
+async function confirmDeleteCert() {
+  certDeleteShow.value = false
+  try {
+    await axios.delete('/api/certs')
+    certMsg.value = 'Certificate deleted. Generate a new one or upload.'
+    certInfo.value = null
+    loadAll()
+  } catch (e: any) {
+    certMsg.value = e.response?.data?.error || 'Failed to delete certificate'
+  }
 }
 
 async function handleCertUpload(e: Event) {
@@ -1628,6 +1899,78 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 
 /* Cert info */
 .cert-info { background: var(--bg-input); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+
+/* Cert split layout */
+.certs-split { display: flex; gap: 24px; }
+.certs-left { flex: 1; min-width: 0; }
+.certs-right { width: 320px; flex-shrink: 0; }
+@media (max-width: 900px) { .certs-split { flex-direction: column; } .certs-right { width: 100%; } }
+
+/* How it works panel */
+.how-it-works {
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 12px;
+  padding: 20px; position: sticky; top: 16px;
+}
+.how-it-works h4 { color: var(--text-primary); font-size: 1rem; margin-bottom: 16px; }
+.hiw-section { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.hiw-section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+.hiw-section h5 { color: var(--accent); font-size: 0.88rem; margin-bottom: 6px; }
+.hiw-section p { color: var(--text-secondary); font-size: 0.8rem; line-height: 1.5; margin-bottom: 6px; }
+.hiw-section ul, .hiw-section ol { color: var(--text-secondary); font-size: 0.8rem; line-height: 1.6; padding-left: 18px; margin-bottom: 6px; }
+.hiw-section li { margin-bottom: 2px; }
+
+/* Cert status bar */
+.cert-status-bar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-radius: 6px; margin-bottom: 12px; font-size: 0.85rem; font-weight: 500;
+}
+.cert-status-bar.valid { background: rgba(34,197,94,0.1); color: #22c55e; }
+.cert-status-bar.warning { background: rgba(234,179,8,0.1); color: #eab308; }
+.cert-status-bar.expired { background: rgba(239,68,68,0.1); color: #ef4444; }
+.cert-status-icon { font-weight: 700; font-size: 0.9rem; }
+
+/* Cert mode toggle */
+.cert-mode-toggle {
+  display: flex; gap: 0; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; width: fit-content;
+}
+.cert-mode-toggle button {
+  padding: 8px 20px; background: var(--bg-input); border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 0.85rem; transition: all 0.15s; border-right: 1px solid var(--border);
+}
+.cert-mode-toggle button:last-child { border-right: none; }
+.cert-mode-toggle button.active { background: var(--accent); color: #fff; }
+
+.cert-active-badge {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem;
+  color: var(--text-muted); margin-bottom: 12px;
+}
+.cert-active-type {
+  padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 0.72rem;
+  text-transform: uppercase; background: rgba(56,189,248,0.15); color: #38bdf8;
+}
+
+.cert-mode-panel { margin-top: 12px; }
+
+/* ACME status */
+.acme-status {
+  background: var(--bg-input); border-radius: 8px; padding: 12px; margin-top: 12px;
+}
+.acme-status-badge {
+  padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+}
+.acme-status-badge.active, .acme-status-badge.issued { background: rgba(34,197,94,0.15); color: #22c55e; }
+.acme-status-badge.pending { background: rgba(234,179,8,0.15); color: #eab308; }
+.acme-status-badge.failed { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+/* Danger outline button */
+.btn-danger-outline {
+  padding: 8px 16px; background: none; color: #ef4444; border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 6px; cursor: pointer; font-size: 0.85rem; transition: all 0.15s;
+}
+.btn-danger-outline:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; }
+.btn-danger { background: #ef4444; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+.btn-danger:hover { background: #dc2626; }
+.btn-danger:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* Code editor */
 .code-editor {
