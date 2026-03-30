@@ -79,11 +79,6 @@ func (s *Server) createZone(c *gin.Context) {
 		return
 	}
 
-	nameservers := req.Nameservers
-	if len(nameservers) == 0 {
-		nameservers = []string{"ns1." + req.Name, "ns2." + req.Name}
-	}
-
 	// --- SOA ---
 	soaValue := fmt.Sprintf("%s %s %d 3600 900 604800 300",
 		req.PrimaryNS, req.AdminEmail, zone.SOASerial)
@@ -91,45 +86,31 @@ func (s *Server) createZone(c *gin.Context) {
 		ZoneID: zone.ID, Name: "@", Type: "SOA", Value: soaValue, TTL: req.TTL,
 	})
 
-	// --- NS records ---
-	for _, ns := range nameservers {
+	// --- NS record (primary nameserver) ---
+	s.db.CreateRecord(&db.DNSRecord{
+		ZoneID: zone.ID, Name: "@", Type: "NS", Value: req.PrimaryNS, TTL: req.TTL,
+	})
+
+	// Auto-add secondary NS if cluster is configured
+	settingsMu.RLock()
+	clusterRole := clusterStore.Role
+	clusterPeer := clusterStore.PeerAddress
+	settingsMu.RUnlock()
+	if clusterRole != "standalone" && clusterPeer != "" {
+		secondaryNS := "ns2." + req.Name
 		s.db.CreateRecord(&db.DNSRecord{
-			ZoneID: zone.ID, Name: "@", Type: "NS", Value: ns, TTL: req.TTL,
+			ZoneID: zone.ID, Name: "@", Type: "NS", Value: secondaryNS, TTL: req.TTL,
 		})
 	}
 
-	// --- A records for nameservers (glue records) ---
-	// Only if nameservers are subdomains of this zone
-	for i, ns := range nameservers {
-		if len(ns) > len(req.Name) && ns[len(ns)-len(req.Name):] == req.Name {
-			sub := ns[:len(ns)-len(req.Name)-1] // strip ".zone"
-			glueIP := fmt.Sprintf("127.0.0.%d", i+1) // placeholder — user should update
+	// Additional nameservers if explicitly provided
+	for _, ns := range req.Nameservers {
+		if ns != req.PrimaryNS {
 			s.db.CreateRecord(&db.DNSRecord{
-				ZoneID: zone.ID, Name: sub, Type: "A", Value: glueIP, TTL: req.TTL,
+				ZoneID: zone.ID, Name: "@", Type: "NS", Value: ns, TTL: req.TTL,
 			})
 		}
 	}
-
-	// --- DNSSEC (auto-generate key and create DS/DNSKEY) ---
-	dnssecKey, err := s.dnssec.GenerateKey(req.Name)
-	if err == nil && dnssecKey != nil {
-		// Store DNSKEY as a record in the zone
-		s.db.CreateRecord(&db.DNSRecord{
-			ZoneID: zone.ID, Name: "@", Type: "DNSKEY",
-			Value: dnssecKey.DNSKEYRecord, TTL: req.TTL,
-		})
-		// Store DS record reference
-		s.db.CreateRecord(&db.DNSRecord{
-			ZoneID: zone.ID, Name: "@", Type: "DS",
-			Value: dnssecKey.DSRecord, TTL: req.TTL,
-		})
-	}
-
-	// --- CAA (Let's Encrypt default) ---
-	s.db.CreateRecord(&db.DNSRecord{
-		ZoneID: zone.ID, Name: "@", Type: "CAA",
-		Value: "0 issue \"letsencrypt.org\"", TTL: req.TTL,
-	})
 
 	c.JSON(http.StatusCreated, zone)
 }

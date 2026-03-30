@@ -191,6 +191,7 @@ func (s *Server) setupRoutes() {
 		protected.PUT("/settings/primary-domain", s.setPrimaryDomain)
 		protected.GET("/settings/cluster", s.getCluster)
 		protected.PUT("/settings/cluster", s.setCluster)
+		protected.POST("/settings/cluster/test", s.testClusterPeer)
 		protected.GET("/settings/filtering-mode", s.getFilteringMode)
 		protected.PUT("/settings/filtering-mode", s.setFilteringMode)
 

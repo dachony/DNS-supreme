@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/dachony/dns-supreme/internal/db"
 	"github.com/gin-gonic/gin"
+	dns "github.com/miekg/dns"
 )
 
 // In-memory settings store (production would persist to DB)
@@ -164,6 +166,47 @@ func (s *Server) setCluster(c *gin.Context) {
 		s.db.SetSetting("cluster_config", string(data))
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Cluster settings saved. Restart to apply."})
+}
+
+func (s *Server) testClusterPeer(c *gin.Context) {
+	settingsMu.RLock()
+	peer := clusterStore.PeerAddress
+	port := clusterStore.PeerPort
+	settingsMu.RUnlock()
+
+	if peer == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No peer address configured"})
+		return
+	}
+	if port == 0 {
+		port = 53
+	}
+
+	addr := fmt.Sprintf("%s:%d", peer, port)
+	start := time.Now()
+
+	// Try DNS query to peer
+	m := new(dns.Msg)
+	m.SetQuestion(".", dns.TypeSOA)
+	client := &dns.Client{Timeout: 5 * time.Second}
+	_, _, err := client.Exchange(m, addr)
+	latency := time.Since(start)
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":     "offline",
+			"error":      err.Error(),
+			"peer":       addr,
+			"latency_ms": latency.Seconds() * 1000,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":     "online",
+		"peer":       addr,
+		"latency_ms": float64(latency.Microseconds()) / 1000.0,
+	})
 }
 
 func (s *Server) getClusterFromDB() {

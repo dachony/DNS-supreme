@@ -5,12 +5,24 @@
     <!-- Create Zone -->
     <div class="section" v-if="!selectedZone">
       <h3>Create New Zone</h3>
-      <p class="section-desc">Create a forward zone (e.g. example.com) or reverse zone (e.g. 168.192.in-addr.arpa for 192.168.x.x)</p>
+      <div class="zone-mode-toggle">
+        <button type="button" :class="{ active: zoneMode === 'forward' }" @click="zoneMode = 'forward'">Forward Zone</button>
+        <button type="button" :class="{ active: zoneMode === 'reverse' }" @click="zoneMode = 'reverse'">Reverse Zone (PTR)</button>
+      </div>
+      <p class="section-desc" v-if="zoneMode === 'forward'">Forward zones resolve domain names to IP addresses (A, AAAA, CNAME, MX, etc.)</p>
+      <p class="section-desc" v-else>Reverse zones resolve IP addresses to hostnames (PTR records). Enter your subnet and the in-addr.arpa name will be generated automatically.</p>
       <form class="create-form" @submit.prevent="createZone">
         <div class="form-grid">
-          <div class="field">
+          <div class="field" v-if="zoneMode === 'forward'">
             <label>Zone Name</label>
-            <input v-model="newZone.name" placeholder="example.com or 168.192.in-addr.arpa" required />
+            <input v-model="newZone.name" placeholder="example.com" required />
+          </div>
+          <div class="field" v-else>
+            <label>Subnet</label>
+            <div class="reverse-input-row">
+              <input v-model="reverseSubnet" placeholder="192.168.1" @input="autoGenerateReverse" />
+              <span class="reverse-preview" v-if="newZone.name">{{ newZone.name }}</span>
+            </div>
           </div>
           <div class="field">
             <label>Zone Type</label>
@@ -34,13 +46,6 @@
           <div class="field">
             <label>Default TTL (seconds)</label>
             <input v-model.number="newZone.ttl" type="number" />
-          </div>
-        </div>
-        <div class="reverse-helper" v-if="!newZone.name.includes('arpa')">
-          <button type="button" @click="generateReverse" class="btn-link">Generate reverse zone for a subnet</button>
-          <div v-if="showReverseHelper" class="reverse-input">
-            <input v-model="reverseSubnet" placeholder="e.g. 192.168.1" />
-            <button type="button" @click="applyReverse" class="btn-xs primary">Create</button>
           </div>
         </div>
         <button type="submit" :disabled="!newZone.name" class="btn-primary">Create Zone</button>
@@ -75,77 +80,19 @@
         <button @click="selectedZone = null; loadZones()" class="btn-back">Back to zones</button>
         <h3 class="zone-title">{{ selectedZone.name }}</h3>
         <span class="zone-type-badge" :class="selectedZone.type">{{ selectedZone.type }}</span>
+        <span v-if="selectedZone.name.includes('arpa')" class="zone-reverse-badge">Reverse</span>
+        <span v-if="zoneDNSSEC?.enabled" class="zone-dnssec-badge">DNSSEC</span>
       </div>
 
-      <!-- SOA Info -->
-      <div class="section">
-        <div class="section-header-row">
-          <h3>Zone Information</h3>
-          <button @click="showSystemRecords = !showSystemRecords" class="btn-link">
-            {{ showSystemRecords ? 'Hide' : 'Show' }} SOA & NS records
-          </button>
-        </div>
-
-        <div class="zone-info-grid">
-          <div class="info-item"><span class="info-label">Zone</span><span class="info-value">{{ selectedZone.name }}</span></div>
-          <div class="info-item"><span class="info-label">Type</span><span class="info-value">{{ selectedZone.type === 'primary' ? 'Primary (authoritative)' : 'Secondary (replica)' }}</span></div>
-          <div class="info-item"><span class="info-label">SOA Serial</span><span class="info-value mono">{{ selectedZone.soa_serial }}</span></div>
-          <div class="info-item"><span class="info-label">Default TTL</span><span class="info-value">{{ selectedZone.ttl }} seconds</span></div>
-        </div>
-
-        <!-- System records (SOA, NS, DNSKEY, DS, CAA) -->
-        <div v-if="showSystemRecords" class="system-records">
-          <h4>Zone Infrastructure Records</h4>
-          <p class="section-desc">These records are required for the zone to function correctly. They were created automatically.</p>
-          <div v-for="group in systemRecordGroups" :key="group.type" class="sys-group">
-            <div class="sys-group-header">
-              <span class="rec-type-badge" :class="group.type.toLowerCase()">{{ group.type }}</span>
-              <span class="sys-group-desc">{{ recordTypeDesc(group.type) }}</span>
-            </div>
-            <div v-for="r in group.records" :key="r.id" class="sys-record">
-              <span class="sys-name" v-if="r.name !== '@'">{{ r.name }}</span>
-              <span class="sys-value">{{ r.value }}</span>
-              <span class="sys-ttl">TTL {{ r.ttl }}s</span>
-            </div>
-          </div>
-        </div>
+      <!-- Quick Info Bar -->
+      <div class="zone-info-bar">
+        <span>SOA Serial: <strong>{{ selectedZone.soa_serial }}</strong></span>
+        <span>TTL: <strong>{{ selectedZone.ttl }}s</strong></span>
+        <span>Type: <strong>{{ selectedZone.type === 'primary' ? 'Primary' : 'Secondary' }}</strong></span>
+        <span>Records: <strong>{{ userRecords.length }}</strong></span>
       </div>
 
-      <!-- DNSSEC -->
-      <div class="section">
-        <h3>DNSSEC Signing</h3>
-        <div v-if="zoneDNSSEC">
-          <div class="dnssec-status">
-            <div class="toggle-wrap" @click="toggleZoneDNSSEC">
-              <div class="toggle" :class="{ on: zoneDNSSEC.enabled }"><div class="toggle-knob"></div></div>
-              <span>{{ zoneDNSSEC.enabled ? 'Zone signing active' : 'Signing disabled' }}</span>
-            </div>
-          </div>
-          <div class="dnssec-details">
-            <div class="detail-row">
-              <span class="detail-label">Algorithm</span>
-              <span class="detail-value">{{ zoneDNSSEC.algorithm }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Key Tag</span>
-              <span class="detail-value mono">{{ zoneDNSSEC.key_tag }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">DS Record</span>
-              <span class="detail-value mono small">{{ zoneDNSSEC.ds_record }}</span>
-              <button @click="copyText(zoneDNSSEC.ds_record)" class="btn-copy">Copy</button>
-            </div>
-            <p class="section-desc">Add the DS record above to your domain registrar to complete DNSSEC chain of trust.</p>
-          </div>
-          <button @click="removeZoneDNSSEC" class="btn-text-danger">Remove DNSSEC key</button>
-        </div>
-        <div v-else>
-          <p class="section-desc">This zone is not signed. Enable DNSSEC to protect against DNS spoofing.</p>
-          <button @click="signZone" class="btn-primary">Enable DNSSEC Signing</button>
-        </div>
-      </div>
-
-      <!-- User Records -->
+      <!-- DNS Records (primary content — first) -->
       <div class="section">
         <h3>DNS Records</h3>
         <form class="record-form" @submit.prevent="addRecord">
@@ -204,8 +151,8 @@
                 <td>{{ r.ttl }}</td>
                 <td>{{ r.priority || '' }}</td>
                 <td class="action-cell">
-                  <button @click="startEdit(r)" class="btn-icon-edit" title="Edit">&#x270E;</button>
-                  <button @click="deleteRecord(r)" class="btn-icon-remove" title="Delete">&#x2715;</button>
+                  <button @click="startEdit(r)" class="btn-rec-edit" title="Edit">Edit</button>
+                  <button @click="deleteRecord(r)" class="btn-rec-delete" title="Delete">Delete</button>
                 </td>
               </template>
             </tr>
@@ -214,6 +161,67 @@
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Zone Infrastructure (SOA, NS, DNSSEC — bottom, collapsible) -->
+      <div class="section section-infra">
+        <div class="section-header-row">
+          <h3>Zone Infrastructure</h3>
+          <button @click="showInfra = !showInfra" class="btn-link">
+            {{ showInfra ? 'Collapse' : 'Expand' }}
+          </button>
+        </div>
+
+        <div v-if="showInfra">
+          <!-- SOA / NS / DNSKEY / DS / CAA records -->
+          <div class="system-records">
+            <div v-for="group in systemRecordGroups" :key="group.type" class="sys-group">
+              <div class="sys-group-header">
+                <span class="rec-type-badge" :class="group.type.toLowerCase()">{{ group.type }}</span>
+                <span class="sys-group-desc">{{ recordTypeDesc(group.type) }}</span>
+              </div>
+              <div v-for="r in group.records" :key="r.id" class="sys-record">
+                <span class="sys-name" v-if="r.name !== '@'">{{ r.name }}</span>
+                <span class="sys-value">{{ r.value }}</span>
+                <span class="sys-ttl">TTL {{ r.ttl }}s</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- DNSSEC -->
+          <div class="dnssec-section">
+            <h4>DNSSEC Signing</h4>
+            <div v-if="zoneDNSSEC">
+              <div class="dnssec-status">
+                <div class="toggle-wrap" @click="toggleZoneDNSSEC">
+                  <div class="toggle" :class="{ on: zoneDNSSEC.enabled }"><div class="toggle-knob"></div></div>
+                  <span>{{ zoneDNSSEC.enabled ? 'Zone signing active' : 'Signing disabled' }}</span>
+                </div>
+              </div>
+              <div class="dnssec-details">
+                <div class="detail-row">
+                  <span class="detail-label">Algorithm</span>
+                  <span class="detail-value">{{ zoneDNSSEC.algorithm }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Key Tag</span>
+                  <span class="detail-value mono">{{ zoneDNSSEC.key_tag }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">DS Record</span>
+                  <span class="detail-value mono small">{{ zoneDNSSEC.ds_record }}</span>
+                  <button @click="copyText(zoneDNSSEC.ds_record)" class="btn-copy">Copy</button>
+                </div>
+                <p class="section-desc">Add the DS record above to your domain registrar to complete DNSSEC chain of trust.</p>
+              </div>
+              <button @click="removeZoneDNSSEC" class="btn-text-danger">Remove DNSSEC key</button>
+            </div>
+            <div v-else>
+              <p class="section-desc">This zone is not signed. Enable DNSSEC to protect against DNS spoofing.</p>
+              <button @click="signZone" class="btn-primary">Enable DNSSEC Signing</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -254,9 +262,9 @@ async function setAsPrimary(z: any) {
 }
 const records = ref<any[]>([])
 const zoneDNSSEC = ref<any>(null)
-const showSystemRecords = ref(false)
+const showInfra = ref(false)
 const error = ref('')
-const showReverseHelper = ref(false)
+const zoneMode = ref('forward')
 const reverseSubnet = ref('')
 
 const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA']
@@ -326,6 +334,12 @@ async function selectZone(z: any) {
   selectedZone.value = data.zone
   records.value = data.records || []
   zoneDNSSEC.value = data.dnssec || null
+  // Auto-select PTR for reverse zones
+  if (data.zone?.name?.includes('arpa')) {
+    newRecord.value.type = 'PTR'
+  } else {
+    newRecord.value.type = 'A'
+  }
 }
 
 async function addRecord() {
@@ -371,11 +385,13 @@ async function removeZoneDNSSEC() {
 
 function copyText(t: string) { navigator.clipboard.writeText(t) }
 
-function generateReverse() { showReverseHelper.value = !showReverseHelper.value }
-function applyReverse() {
-  const parts = reverseSubnet.value.trim().split('.').reverse()
-  newZone.value.name = parts.join('.') + '.in-addr.arpa'
-  showReverseHelper.value = false
+function autoGenerateReverse() {
+  const parts = reverseSubnet.value.trim().split('.').filter(p => p !== '').reverse()
+  if (parts.length > 0) {
+    newZone.value.name = parts.join('.') + '.in-addr.arpa'
+  } else {
+    newZone.value.name = ''
+  }
 }
 
 onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
@@ -383,6 +399,38 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
 
 <style scoped>
 .zones-page h2 { margin-bottom: 24px; }
+
+/* Zone info bar */
+.zone-info-bar {
+  display: flex; gap: 20px; padding: 10px 16px; margin-bottom: 16px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 0.85rem; color: var(--text-secondary); flex-wrap: wrap;
+}
+.zone-info-bar strong { color: var(--text-primary); }
+
+/* Zone mode toggle */
+.zone-mode-toggle {
+  display: flex; gap: 0; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; width: fit-content;
+}
+.zone-mode-toggle button {
+  padding: 8px 20px; background: var(--bg-input); border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 0.85rem; transition: all 0.15s;
+}
+.zone-mode-toggle button.active {
+  background: var(--accent); color: #fff;
+}
+
+/* Reverse input */
+.reverse-input-row { display: flex; gap: 10px; align-items: center; }
+.reverse-input-row input { flex: 1; }
+.reverse-preview {
+  color: var(--accent); font-family: monospace; font-size: 0.82rem; white-space: nowrap;
+}
+
+/* Infrastructure section */
+.section-infra { opacity: 0.9; }
+.dnssec-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.dnssec-section h4 { color: var(--text-primary); font-size: 0.95rem; margin-bottom: 10px; }
 
 .section {
   background: var(--bg-card); border-radius: 12px; padding: 24px;
@@ -404,10 +452,16 @@ onMounted(() => { loadZones(); loadPrimaryDomain(); loadServerHostname() })
 .btn-copy { padding: 2px 8px; background: var(--bg-hover); color: var(--text-secondary); border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; transition: all 0.15s; }
 .btn-copy:hover { color: var(--text-primary); }
 .action-cell { display: flex; gap: 6px; }
-.btn-icon-edit { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 0.9rem; transition: color 0.15s; }
-.btn-icon-edit:hover { color: var(--accent); }
-.btn-icon-remove { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 0.9rem; transition: color 0.15s; }
-.btn-icon-remove:hover { color: #ef4444; }
+.btn-rec-edit {
+  background: none; border: 1px solid var(--border); color: var(--text-secondary); cursor: pointer;
+  font-size: 0.75rem; padding: 3px 10px; border-radius: 4px; transition: all 0.15s;
+}
+.btn-rec-edit:hover { border-color: var(--accent); color: var(--accent); }
+.btn-rec-delete {
+  background: none; border: 1px solid rgba(239,68,68,0.3); color: #ef4444; cursor: pointer;
+  font-size: 0.75rem; padding: 3px 10px; border-radius: 4px; transition: all 0.15s;
+}
+.btn-rec-delete:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; }
 .btn-icon-save { background: none; border: none; color: #22c55e; cursor: pointer; font-size: 1rem; }
 .btn-icon-cancel { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.9rem; }
 

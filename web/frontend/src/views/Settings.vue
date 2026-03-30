@@ -53,6 +53,20 @@
       </div>
 
       <div v-if="cluster.role !== 'standalone'" class="cluster-config">
+        <!-- Peer Status -->
+        <div class="cluster-status-panel" v-if="cluster.peer_address">
+          <div class="cluster-status-header">
+            <span class="cluster-status-dot" :class="clusterPeerStatus"></span>
+            <span class="cluster-status-text">
+              Peer: <strong>{{ cluster.peer_address }}:{{ cluster.peer_port || 53 }}</strong>
+              — {{ clusterPeerStatus === 'online' ? 'Connected' : clusterPeerStatus === 'checking' ? 'Checking...' : 'Unreachable' }}
+            </span>
+            <span v-if="clusterLatency > 0" class="cluster-latency">{{ clusterLatency.toFixed(1) }}ms</span>
+          </div>
+          <button @click="testClusterPeer" :disabled="clusterPeerStatus === 'checking'" class="btn-test-peer">Test Connection</button>
+          <span v-if="clusterError" class="cluster-error">{{ clusterError }}</span>
+        </div>
+
         <div class="settings-grid">
           <div class="field">
             <label>Peer Address</label>
@@ -844,6 +858,24 @@ const cluster = ref<any>({
   shared_secret: '', sync_zones: true, sync_blocklists: true, sync_settings: false, peers: [],
 })
 const clusterMsg = ref('')
+const clusterPeerStatus = ref('unknown')
+const clusterLatency = ref(0)
+const clusterError = ref('')
+
+async function testClusterPeer() {
+  clusterPeerStatus.value = 'checking'
+  clusterError.value = ''
+  clusterLatency.value = 0
+  try {
+    const { data } = await axios.post('/api/settings/cluster/test')
+    clusterPeerStatus.value = data.status
+    clusterLatency.value = data.latency_ms || 0
+    if (data.error) clusterError.value = data.error
+  } catch (e: any) {
+    clusterPeerStatus.value = 'offline'
+    clusterError.value = e.response?.data?.error || 'Connection test failed'
+  }
+}
 
 const protocols = ref([
   { id: 'udp', name: 'DNS (UDP)', port: 'Port 53', desc: 'Standard DNS over UDP — fastest, most common', enabled: true },
@@ -1675,6 +1707,32 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 .mode-cards.three-col { grid-template-columns: repeat(3, 1fr); }
 .cluster-config { margin-top: 16px; }
 .sync-options { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
+
+/* Cluster status panel */
+.cluster-status-panel {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; margin-bottom: 16px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+}
+.cluster-status-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  background: #64748b;
+}
+.cluster-status-dot.online { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+.cluster-status-dot.offline { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+.cluster-status-dot.checking { background: #eab308; animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.cluster-status-text { color: var(--text-secondary); font-size: 0.88rem; flex: 1; }
+.cluster-status-text strong { color: var(--text-primary); }
+.cluster-latency { color: var(--accent); font-size: 0.82rem; font-family: monospace; }
+.btn-test-peer {
+  padding: 5px 14px; background: var(--accent); color: #fff; border: none;
+  border-radius: 6px; cursor: pointer; font-size: 0.8rem; white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.btn-test-peer:hover:not(:disabled) { opacity: 0.85; }
+.btn-test-peer:disabled { opacity: 0.5; cursor: wait; }
+.cluster-error { color: #ef4444; font-size: 0.78rem; }
 
 /* Log management */
 .log-stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
