@@ -849,8 +849,8 @@ const protocols = ref([
   { id: 'udp', name: 'DNS (UDP)', port: 'Port 53', desc: 'Standard DNS over UDP — fastest, most common', enabled: true },
   { id: 'tcp', name: 'DNS (TCP)', port: 'Port 53', desc: 'Standard DNS over TCP — for large responses', enabled: true },
   { id: 'dot', name: 'DNS-over-TLS', port: 'Port 853', desc: 'Encrypted DNS using TLS (RFC 7858)', enabled: true },
-  { id: 'doh', name: 'DNS-over-HTTPS', port: 'Port 8443', desc: 'Encrypted DNS over HTTPS (RFC 8484)', enabled: true },
-  { id: 'doq', name: 'DNS-over-QUIC', port: 'Port 8853', desc: 'Encrypted DNS over QUIC (RFC 9250)', enabled: true },
+  { id: 'doh', name: 'DNS-over-HTTPS', port: 'Port 443', desc: 'Encrypted DNS over HTTPS (RFC 8484) — shared with block page via /dns-query', enabled: true },
+  { id: 'doq', name: 'DNS-over-QUIC', port: 'Port 853/UDP', desc: 'Encrypted DNS over QUIC (RFC 9250)', enabled: true },
 ])
 
 const serverSettings = ref({

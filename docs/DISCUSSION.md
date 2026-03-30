@@ -27,8 +27,8 @@ Prva production verzija. Sve faze (1-4) implementirane u jednom danu.
 
 ### Faza 2 (Encrypcija + filtering)
 - DNS-over-TLS (port 853)
-- DNS-over-HTTPS (port 8443)
-- DNS-over-QUIC (port 8853)
+- DNS-over-HTTPS (port 443, path /dns-query)
+- DNS-over-QUIC (port 853/UDP)
 - 22+ community blocklist katalog (Hagezi, OISD, Steven Black, 1Hosts, AdGuard, itd.)
 - Premium feed podrška (Kaspersky, Palo Alto, CrowdStrike, Fortinet, abuse.ch, itd.)
 - Kategorije sa toggle-ovima (Ads, Malware, Adult, Social, Gambling, Tracking)

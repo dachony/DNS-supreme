@@ -15,15 +15,15 @@ Open **http://localhost:5380** and login with `admin` / `admin`.
 ## Requirements
 
 - Docker and Docker Compose
-- Ports: 53 (DNS), 853 (DoT), 8443 (DoH), 80+443 (block page), 5380 (web UI)
+- Ports: 53 (DNS), 853 (DoT+DoQ), 443 (DoH + block page), 80 (block page HTTP), 5380 (web UI)
 
 ## What's Included
 
 ### DNS Server
 - DNS over UDP/TCP (port 53)
 - DNS-over-TLS (port 853)
-- DNS-over-HTTPS (port 8443)
-- DNS-over-QUIC (port 8853)
+- DNS-over-HTTPS (port 443, path /dns-query)
+- DNS-over-QUIC (port 853/UDP)
 - Caching with configurable TTL
 - Authoritative zones with full record management
 
@@ -78,10 +78,9 @@ Open **http://localhost:5380** and login with `admin` / `admin`.
 |------|----------|---------|
 | 53 | UDP+TCP | DNS (standard) |
 | 853 | TCP | DNS-over-TLS (DoT) |
-| 8443 | TCP | DNS-over-HTTPS (DoH) |
-| 8853 | UDP | DNS-over-QUIC (DoQ) |
+| 853 | UDP | DNS-over-QUIC (DoQ, RFC 9250) |
 | 80 | TCP | Block page HTTP |
-| 443 | TCP | Block page HTTPS (shows block page when user visits blocked HTTPS site) |
+| 443 | TCP | Block page HTTPS + DoH (/dns-query) |
 | 5380 | TCP | Management panel (Web UI + API) |
 
 ## Installation
@@ -130,6 +129,7 @@ ports:
   - "5353:53/udp"     # Change 5353 to your preferred DNS port
   - "5353:53/tcp"
   - "8853:853/tcp"    # Change 8853 to your preferred DoT port
+  - "8853:853/udp"    # Change 8853 to your preferred DoQ port
   # ... etc
 ```
 

@@ -23,6 +23,6 @@ COPY --from=backend-builder /dns-supreme /app/dns-supreme
 COPY --from=frontend-builder /app/web/frontend/dist /app/web/dist
 COPY configs/default.json /app/configs/default.json
 
-EXPOSE 53/udp 53/tcp 80 443 853 8080 8853/udp
+EXPOSE 53/udp 53/tcp 80 443 853/tcp 853/udp 8080
 
 ENTRYPOINT ["/app/dns-supreme"]

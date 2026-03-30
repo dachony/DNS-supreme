@@ -65,6 +65,7 @@ type Server struct {
 	tmpl       *template.Template
 	customHTML string
 	blockMap   map[string]string
+	dohHandler http.Handler
 	mu         sync.RWMutex
 }
 
@@ -105,8 +106,15 @@ func (s *Server) RecordBlock(domain, reason string) {
 	s.mu.Unlock()
 }
 
+func (s *Server) SetDoHHandler(handler http.Handler) {
+	s.dohHandler = handler
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
+	if s.dohHandler != nil {
+		mux.Handle("/dns-query", s.dohHandler)
+	}
 	mux.HandleFunc("/", s.handleBlock)
 
 	// HTTP on port 80

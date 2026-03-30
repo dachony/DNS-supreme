@@ -132,8 +132,7 @@ hostname, primary_domain, forwarders, server_settings, np_enabled_categories, ge
 |------|--------|
 | 53 | DNS (UDP+TCP) |
 | 853 | DNS-over-TLS |
-| 8443 | DNS-over-HTTPS |
-| 8853 | DNS-over-QUIC |
+| 853/UDP | DNS-over-QUIC (RFC 9250) |
 | 80 | Block page HTTP |
-| 443 | Block page HTTPS |
+| 443 | Block page HTTPS + DoH (/dns-query) |
 | 5380 | Management panel |

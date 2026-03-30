@@ -6,10 +6,9 @@ services:
       - "53:53/udp"             # DNS UDP
       - "53:53/tcp"             # DNS TCP
       - "853:853/tcp"           # DNS-over-TLS
-      - "8443:8443/tcp"         # DNS-over-HTTPS
-      - "8853:8853/udp"         # DNS-over-QUIC
+      - "853:853/udp"           # DNS-over-QUIC (RFC 9250)
       - "80:80"                 # Block page HTTP
-      - "443:443"               # Block page HTTPS
+      - "443:443"               # Block page HTTPS + DoH (/dns-query)
       - "5380:5380"             # Management panel
     environment:
       - DNS_LISTEN_ADDR=0.0.0.0
@@ -23,6 +22,9 @@ services:
       - API_PORT=5380
       - BLOCKPAGE_HTTP_PORT=80
       - BLOCKPAGE_HTTPS_PORT=443
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - geoipdata:/app/data
     depends_on:

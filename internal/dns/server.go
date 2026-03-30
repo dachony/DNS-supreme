@@ -42,7 +42,6 @@ type Server struct {
 	udpServer  *dns.Server
 	tcpServer  *dns.Server
 	dotServer  *dns.Server
-	dohServer  *http.Server
 	quicLn     *quic.Listener
 	cache      *Cache
 	filterFn   FilterFunc
@@ -163,23 +162,9 @@ func (s *Server) Start() error {
 			}
 		}()
 
-		// DoH on port 8443 (443 reserved for block page)
-		dohAddr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, 8443)
-		mux := http.NewServeMux()
-		mux.HandleFunc("/dns-query", s.handleDoH)
-		s.dohServer = &http.Server{
-			Addr:      dohAddr,
-			Handler:   mux,
-			TLSConfig: s.tlsConfig.Clone(),
-		}
-		go func() {
-			log.Printf("[DNS] DoH listener starting on %s", dohAddr)
-			if err := s.dohServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-				log.Printf("[DNS] DoH error: %v", err)
-			}
-		}()
+		// DoH is handled by block page server on port 443 via SetDoHHandler()
 
-		// DoQ on port 8853
+		// DoQ on port 853/udp (RFC 9250 — same port as DoT but UDP)
 		go s.startDoQ()
 	}
 
@@ -189,7 +174,7 @@ func (s *Server) Start() error {
 	case <-time.After(500 * time.Millisecond):
 		log.Printf("[DNS] Server running on %s (UDP+TCP)", addr)
 		if s.tlsConfig != nil {
-			log.Printf("[DNS] DoT on :853, DoH on :8443, DoQ on :8853")
+			log.Printf("[DNS] DoT on :853, DoH on :443 (via block page), DoQ on :853/udp")
 		}
 		return nil
 	}
@@ -204,9 +189,6 @@ func (s *Server) Shutdown() {
 	}
 	if s.dotServer != nil {
 		s.dotServer.Shutdown()
-	}
-	if s.dohServer != nil {
-		s.dohServer.Close()
 	}
 	if s.quicLn != nil {
 		s.quicLn.Close()
@@ -225,6 +207,11 @@ func (s *Server) handleDoT(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 // --- DoH (RFC 8484) ---
+
+// DoHHandler returns an http.Handler for DNS-over-HTTPS requests.
+func (s *Server) DoHHandler() http.Handler {
+	return http.HandlerFunc(s.handleDoH)
+}
 
 func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 	var msgBytes []byte
@@ -280,7 +267,7 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 // --- DoQ (RFC 9250) ---
 
 func (s *Server) startDoQ() {
-	doqAddr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, 8853)
+	doqAddr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, 853)
 	tlsCfg := s.tlsConfig.Clone()
 	tlsCfg.NextProtos = []string{"doq"}
 

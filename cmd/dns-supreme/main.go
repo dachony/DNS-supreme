@@ -116,13 +116,14 @@ func main() {
 		return zone, records, nil
 	})
 
-	// Start block page server (HTTP on port 80, HTTPS on port 443)
+	// Start block page server (HTTP on port 80, HTTPS+DoH on port 443)
 	blockPageServer := blockpage.NewServer(
 		cfg.BlockPage.ListenAddr,
 		cfg.BlockPage.HTTPPort,
 		cfg.BlockPage.HTTPSPort,
 		tlsConfig,
 	)
+	blockPageServer.SetDoHHandler(dnsServer.DoHHandler())
 	blockPageServer.Start()
 
 	// Connect block page to DNS server
