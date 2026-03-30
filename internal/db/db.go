@@ -248,8 +248,8 @@ func (d *Database) GetQueryLogs(limit, offset int, domain, clientIP string, bloc
 		argN++
 	}
 	if clientIP != "" {
-		where += fmt.Sprintf(" AND client_ip = $%d", argN)
-		args = append(args, clientIP)
+		where += fmt.Sprintf(" AND client_ip LIKE $%d", argN)
+		args = append(args, clientIP+"%")
 		argN++
 	}
 	if blocked != nil {

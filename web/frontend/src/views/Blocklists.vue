@@ -84,19 +84,32 @@
           <button @click="addList" :disabled="!newName || !newUrl" class="btn-add">Add List</button>
         </div>
         <div class="al-actions">
-          <button @click="updateAllLists" :disabled="updatingLists" class="btn-update-now">
-            {{ updatingLists ? 'Updating...' : 'Update Now' }}
-          </button>
           <button @click="deleteAllLists" :disabled="!lists.length" class="btn-delete-all">Delete All</button>
         </div>
       </div>
       <div v-if="addError" class="error-msg">{{ addError }}</div>
 
-      <!-- Category filters -->
-      <div class="catalog-filters" style="margin-bottom:12px" v-if="lists.length">
-        <button v-for="cat in activeListCategories" :key="cat"
-          :class="{ active: activeListFilter === cat }" @click="activeListFilter = activeListFilter === cat ? '' : cat"
-          class="catalog-filter-btn">{{ cat }} <span class="filter-count">{{ activeListCategoryCounts[cat] || 0 }}</span></button>
+      <!-- Filters + Schedule row -->
+      <div class="al-filters-row" v-if="lists.length">
+        <div class="catalog-filters">
+          <button v-for="cat in activeListCategories" :key="cat"
+            :class="{ active: activeListFilter === cat }" @click="activeListFilter = activeListFilter === cat ? '' : cat"
+            class="catalog-filter-btn">{{ cat }} <span class="filter-count">{{ activeListCategoryCounts[cat] || 0 }}</span></button>
+        </div>
+        <div class="al-schedule-inline">
+          <button @click="updateAllLists" :disabled="updatingLists" class="btn-update-now">
+            {{ updatingLists ? 'Updating...' : 'Update Now' }}
+          </button>
+          <select v-model="updateInterval" @change="saveUpdateInterval" class="schedule-select">
+            <option value="0">Auto-update: Off</option>
+            <option value="1">Every hour</option>
+            <option value="6">Every 6 hours</option>
+            <option value="12">Every 12 hours</option>
+            <option value="24">Every 24 hours</option>
+            <option value="48">Every 48 hours</option>
+            <option value="168">Weekly</option>
+          </select>
+        </div>
       </div>
 
       <div class="al-list">
@@ -115,19 +128,6 @@
 
       <div class="stats-bar" v-if="totalDomains > 0">
         Total: {{ totalDomains.toLocaleString() }} domains across {{ totalLists }} lists
-      </div>
-
-      <!-- Update Schedule -->
-      <div class="update-schedule" v-if="lists.length">
-        <span class="schedule-label">Auto-update:</span>
-        <select v-model="updateInterval" @change="saveUpdateInterval" class="schedule-select">
-          <option value="0">Disabled</option>
-          <option value="6">Every 6 hours</option>
-          <option value="12">Every 12 hours</option>
-          <option value="24">Every 24 hours</option>
-          <option value="48">Every 48 hours</option>
-          <option value="168">Weekly</option>
-        </select>
       </div>
 
       <!-- List detail modal -->
@@ -1331,15 +1331,16 @@ onMounted(() => {
 .btn-check-updates:hover { opacity: 0.85; }
 .btn-check-updates:disabled { opacity: 0.5; cursor: wait; }
 
-.update-schedule {
-  margin-top: 12px; padding: 10px 14px; background: var(--bg-input);
-  border: 1px solid var(--border); border-radius: 8px;
-  display: flex; align-items: center; gap: 10px;
+.al-filters-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-bottom: 12px; flex-wrap: wrap;
 }
-.schedule-label { color: var(--text-secondary); font-size: 0.85rem; font-weight: 500; }
+.al-schedule-inline {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
 .schedule-select {
-  padding: 5px 10px; background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 6px; color: var(--text-primary); font-size: 0.85rem; cursor: pointer;
+  padding: 5px 10px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-primary); font-size: 0.82rem; cursor: pointer;
 }
 
 /* List detail modal */

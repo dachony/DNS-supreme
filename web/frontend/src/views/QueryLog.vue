@@ -336,6 +336,10 @@ function queryTypeDesc(t: string): string {
 
 function parseCategory(rule: string): string {
   if (!rule) return ''
+  // Network protection: [netprotect:geo], [netprotect:tor_exits], etc.
+  const np = rule.match(/^\[netprotect:(\w+)\]/)
+  if (np) return 'netprotect_' + np[1]
+  // Standard blocklist: [ads], [malware], etc.
   const m = rule.match(/^\[(\w+)\]/)
   if (m) return m[1]
   if (rule.startsWith('custom:')) return 'custom'
@@ -350,6 +354,9 @@ function formatCategory(rule: string): string {
     ads: 'Ads', malware: 'Malware', adult: 'Adult', social: 'Social',
     gambling: 'Gambling', tracking: 'Tracking', custom: 'Custom Rule',
     allowlist: 'Not Allowed', policy: 'Device Policy', uncategorized: 'Other',
+    netprotect_geo: 'Geo Block', netprotect_tor_exits: 'Tor Exit',
+    netprotect_spamhaus_drop: 'Spamhaus', netprotect_botnet_c2: 'Botnet C2',
+    netprotect_malicious_ips: 'Malicious IP', netprotect_abuse_ch: 'URLhaus',
   }
   return labels[cat] || cat || '-'
 }
@@ -457,6 +464,13 @@ td { padding: 8px; font-size: 0.85rem; }
 .cat-custom { background: rgba(100,116,139,0.12); color: #94a3b8; }
 .cat-allowlist { background: rgba(239,68,68,0.12); color: #ef4444; }
 .cat-policy { background: rgba(139,92,246,0.12); color: #8b5cf6; }
+.cat-netprotect_geo { background: rgba(251,146,60,0.12); color: #fb923c; }
+.cat-netprotect_tor_exits { background: rgba(220,38,38,0.12); color: #dc2626; }
+.cat-netprotect_spamhaus_drop { background: rgba(220,38,38,0.12); color: #dc2626; }
+.cat-netprotect_botnet_c2 { background: rgba(220,38,38,0.12); color: #dc2626; }
+.cat-netprotect_malicious_ips { background: rgba(249,115,22,0.12); color: #f97316; }
+.cat-netprotect_abuse_ch { background: rgba(249,115,22,0.12); color: #f97316; }
+[class*="cat-netprotect_"] { border: 1px solid currentColor; border-opacity: 0.3; }
 .cat-none { color: var(--text-dim); font-size: 0.8rem; }
 
 /* Modal */
