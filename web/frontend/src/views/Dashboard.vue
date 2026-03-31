@@ -166,6 +166,7 @@ const hours = ref(24)
 const loading = ref(false)
 const refreshInterval = ref(5)
 let refreshTimer: any = null
+let eventSource: EventSource | null = null
 
 const refreshOptions = [
   { label: '1s', value: 1 },
@@ -271,13 +272,51 @@ function barColor(pct: number): string {
   return 'bar-green'
 }
 
+function connectSSE() {
+  const token = localStorage.getItem('token')
+  if (!token) return
+
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+
+  eventSource = new EventSource(`/api/events?token=${token}`)
+
+  eventSource.addEventListener('stats', (event: MessageEvent) => {
+    try {
+      const newStats = JSON.parse(event.data)
+      // Only update via SSE when viewing last 1 hour (real-time view)
+      if (hours.value === 1) {
+        stats.value = newStats
+      }
+    } catch (e) {
+      // Ignore parse errors
+    }
+  })
+
+  eventSource.onerror = () => {
+    if (eventSource) {
+      eventSource.close()
+      eventSource = null
+    }
+    // Reconnect after 5 seconds
+    setTimeout(connectSSE, 5000)
+  }
+}
+
 onMounted(() => {
   loadStats(24)
   setRefresh(refreshInterval.value)
+  connectSSE()
 })
 
 onUnmounted(() => {
   clearInterval(refreshTimer)
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
 })
 </script>
 

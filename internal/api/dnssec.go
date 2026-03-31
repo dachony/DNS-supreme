@@ -2,7 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	dnsserver "github.com/dachony/dns-supreme/internal/dns"
@@ -17,6 +17,7 @@ func (s *Server) setupDNSSECRoutes(protected *gin.RouterGroup) {
 		dnssec.GET("/:zone", s.getDNSSECKey)
 		dnssec.PUT("/:zone", s.toggleDNSSEC)
 		dnssec.DELETE("/:zone", s.deleteDNSSECKey)
+		dnssec.POST("/:zone/rotate", s.rotateDNSSECKey)
 	}
 }
 
@@ -78,6 +79,26 @@ func (s *Server) deleteDNSSECKey(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+func (s *Server) rotateDNSSECKey(c *gin.Context) {
+	zoneName := c.Param("zone")
+
+	newKey, err := s.dnssec.RotateKey(zoneName)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Persist to DB
+	s.persistDNSSECKeys()
+
+	// Audit log
+	userID, _ := c.Get("userID")
+	username, _ := c.Get("username")
+	s.db.LogAudit(userID.(int), username.(string), "dnssec_rotate", "Rotated DNSSEC key for zone: "+zoneName, c.ClientIP())
+
+	c.JSON(http.StatusOK, gin.H{"key": newKey})
+}
+
 func (s *Server) persistDNSSECKeys() {
 	keys := s.dnssec.ListKeys()
 	data, _ := json.Marshal(keys)
@@ -95,7 +116,7 @@ func (s *Server) restoreDNSSECKeys() {
 	}
 	for _, k := range keys {
 		if err := s.dnssec.RestoreKey(k); err != nil {
-			log.Printf("[DNSSEC] Failed to restore key for %s: %v", k.ZoneName, err)
+			slog.Error("failed to restore DNSSEC key", "component", "dnssec", "zone", k.ZoneName, "error", err)
 		}
 	}
 }

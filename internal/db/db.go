@@ -3,7 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -90,7 +90,7 @@ func New(dbCfg config.DatabaseConfig, logCfg config.LoggingConfig) (*Database, e
 		if err := db.Ping(); err == nil {
 			break
 		}
-		log.Printf("[DB] Waiting for database... (%d/30)", i+1)
+		slog.Info("waiting for database", "component", "db", "attempt", i+1, "max_attempts", 30)
 		time.Sleep(1 * time.Second)
 	}
 
@@ -111,8 +111,9 @@ func New(dbCfg config.DatabaseConfig, logCfg config.LoggingConfig) (*Database, e
 
 	go d.flushLoop()
 	d.startRetentionCleanup()
+	d.startAggregation()
 
-	log.Printf("[DB] Connected to PostgreSQL")
+	slog.Info("connected to PostgreSQL", "component", "db")
 	return d, nil
 }
 
@@ -134,11 +135,11 @@ func (d *Database) cleanOldLogs() {
 	cutoff := time.Now().AddDate(0, 0, -d.cfg.RetentionDays)
 	result, err := d.db.Exec("DELETE FROM query_log WHERE timestamp < $1", cutoff)
 	if err != nil {
-		log.Printf("[DB] Retention cleanup error: %v", err)
+		slog.Error("retention cleanup error", "component", "db", "error", err)
 		return
 	}
 	if rows, _ := result.RowsAffected(); rows > 0 {
-		log.Printf("[DB] Retention cleanup: deleted %d logs older than %d days", rows, d.cfg.RetentionDays)
+		slog.Info("retention cleanup completed", "component", "db", "deleted_rows", rows, "retention_days", d.cfg.RetentionDays)
 	}
 }
 
@@ -205,6 +206,18 @@ func (d *Database) migrate() error {
 		client_ip VARCHAR(45)
 	);
 	CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log (timestamp DESC);
+
+	CREATE TABLE IF NOT EXISTS query_log_hourly (
+		id BIGSERIAL PRIMARY KEY,
+		hour TIMESTAMPTZ NOT NULL,
+		client_ip VARCHAR(45) NOT NULL,
+		domain VARCHAR(255) NOT NULL,
+		query_type VARCHAR(10) NOT NULL,
+		blocked BOOLEAN NOT NULL DEFAULT FALSE,
+		count INTEGER NOT NULL DEFAULT 1,
+		UNIQUE(hour, client_ip, domain, query_type, blocked)
+	);
+	CREATE INDEX IF NOT EXISTS idx_query_log_hourly_hour ON query_log_hourly (hour DESC);
 	`
 	_, err := d.db.Exec(schema)
 	if err != nil {
@@ -214,6 +227,50 @@ func (d *Database) migrate() error {
 	d.db.Exec("ALTER TABLE query_log ADD COLUMN IF NOT EXISTS protocol VARCHAR(10) DEFAULT ''")
 	d.db.Exec("ALTER TABLE query_log ADD COLUMN IF NOT EXISTS client_hostname VARCHAR(255) DEFAULT ''")
 	return d.migrateZones()
+}
+
+func (d *Database) startAggregation() {
+	// Run every hour
+	ticker := time.NewTicker(1 * time.Hour)
+	go func() {
+		// Initial delay to not conflict with startup
+		time.Sleep(5 * time.Minute)
+		d.aggregateOldLogs()
+		for range ticker.C {
+			d.aggregateOldLogs()
+		}
+	}()
+}
+
+func (d *Database) aggregateOldLogs() {
+	// Aggregate logs older than 24 hours into hourly summaries
+	cutoff := time.Now().Add(-24 * time.Hour)
+
+	_, err := d.db.Exec(`
+		INSERT INTO query_log_hourly (hour, client_ip, domain, query_type, blocked, count)
+		SELECT date_trunc('hour', timestamp) as hour,
+		       client_ip, domain, query_type, blocked,
+		       COUNT(*) as count
+		FROM query_log
+		WHERE timestamp < $1
+		GROUP BY hour, client_ip, domain, query_type, blocked
+		ON CONFLICT (hour, client_ip, domain, query_type, blocked)
+		DO UPDATE SET count = query_log_hourly.count + EXCLUDED.count
+	`, cutoff)
+	if err != nil {
+		slog.Error("aggregation insert error", "component", "db", "error", err)
+		return
+	}
+
+	// Delete aggregated detailed rows
+	result, err := d.db.Exec("DELETE FROM query_log WHERE timestamp < $1", cutoff)
+	if err != nil {
+		slog.Error("aggregation cleanup error", "component", "db", "error", err)
+		return
+	}
+	if rows, _ := result.RowsAffected(); rows > 0 {
+		slog.Info("aggregated and removed old log entries", "component", "db", "deleted_rows", rows, "older_than", "24h")
+	}
 }
 
 func (d *Database) LogQuery(entry QueryLog) {
@@ -256,7 +313,7 @@ func (d *Database) flush() {
 
 	tx, err := d.db.Begin()
 	if err != nil {
-		log.Printf("[DB] Failed to begin transaction: %v", err)
+		slog.Error("failed to begin transaction", "component", "db", "error", err)
 		return
 	}
 
@@ -266,7 +323,7 @@ func (d *Database) flush() {
 	`)
 	if err != nil {
 		tx.Rollback()
-		log.Printf("[DB] Failed to prepare statement: %v", err)
+		slog.Error("failed to prepare statement", "component", "db", "error", err)
 		return
 	}
 	defer stmt.Close()
@@ -274,12 +331,12 @@ func (d *Database) flush() {
 	for _, e := range entries {
 		_, err := stmt.Exec(e.Timestamp, e.ClientIP, e.ClientHostname, e.Domain, e.QueryType, e.Blocked, e.BlockRule, e.ResponseIP, e.LatencyMs, e.Upstream, e.Protocol)
 		if err != nil {
-			log.Printf("[DB] Failed to insert query log: %v", err)
+			slog.Error("failed to insert query log", "component", "db", "error", err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Printf("[DB] Failed to commit: %v", err)
+		slog.Error("failed to commit transaction", "component", "db", "error", err)
 	}
 }
 

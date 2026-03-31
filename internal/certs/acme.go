@@ -11,7 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
@@ -117,7 +117,7 @@ func (a *ACMEClient) RequestCertificate(domain string) error {
 	acct := &acme.Account{Contact: []string{"mailto:" + cfg.Email}}
 	if _, err := client.Register(ctx, acct, acme.AcceptTOS); err != nil {
 		// Already registered is OK
-		log.Printf("[ACME] Account registration: %v (may already exist)", err)
+		slog.Info("ACME account registration", "component", "acme", "note", "may already exist", "error", err)
 	}
 
 	// Create order
@@ -236,7 +236,7 @@ func (a *ACMEClient) RequestCertificate(domain string) error {
 	copyFile(certPath, serverCert)
 	copyFile(keyPath, serverKey)
 
-	log.Printf("[ACME] Certificate obtained for %s, saved to %s", domain, certPath)
+	slog.Info("certificate obtained", "component", "acme", "domain", domain, "path", certPath)
 	return nil
 }
 
@@ -278,7 +278,7 @@ func GenerateSelfSignedForDomain(domain, certDir string) error {
 	pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	keyFile.Close()
 
-	log.Printf("[Certs] Self-signed certificate generated for %s", domain)
+	slog.Info("self-signed certificate generated for domain", "component", "certs", "domain", domain)
 	return nil
 }
 
@@ -341,7 +341,7 @@ func (a *ACMEClient) CloudflareDNSSet(fqdn, value string) error {
 		return fmt.Errorf("Cloudflare API error: %s", string(respBody))
 	}
 
-	log.Printf("[ACME/Cloudflare] Created TXT record for %s", fqdn)
+	slog.Info("created TXT record", "component", "acme/cloudflare", "fqdn", fqdn)
 	return nil
 }
 
@@ -378,7 +378,7 @@ func (a *ACMEClient) CloudflareDNSClear(fqdn string) error {
 		http.DefaultClient.Do(delReq)
 	}
 
-	log.Printf("[ACME/Cloudflare] Cleared TXT records for %s", fqdn)
+	slog.Info("cleared TXT records", "component", "acme/cloudflare", "fqdn", fqdn)
 	return nil
 }
 

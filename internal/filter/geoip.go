@@ -4,7 +4,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -48,7 +48,7 @@ func NewGeoIPReader(dataDir string) (*GeoIPReader, error) {
 	}
 
 	// Auto-download from DB-IP (free, MMDB format, no key needed)
-	log.Println("[GeoIP] Database not found, downloading from DB-IP...")
+	slog.Info("database not found, downloading from DB-IP", "component", "geoip")
 	if err := downloadDBIP(dbPath); err != nil {
 		return nil, fmt.Errorf("failed to download GeoIP database: %w", err)
 	}
@@ -61,7 +61,7 @@ func openDB(path string) (*GeoIPReader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open GeoIP database %s: %w", path, err)
 	}
-	log.Printf("[GeoIP] Loaded database: %s (type: %s)", path, db.Metadata.DatabaseType)
+	slog.Info("loaded GeoIP database", "component", "geoip", "path", path, "type", db.Metadata.DatabaseType)
 	return &GeoIPReader{db: db, path: path}, nil
 }
 
@@ -140,6 +140,6 @@ func downloadDBIP(destPath string) error {
 		return fmt.Errorf("write failed: %w", err)
 	}
 
-	log.Printf("[GeoIP] Downloaded DB-IP database: %s (%.1f MB)", destPath, float64(written)/1024/1024)
+	slog.Info("downloaded DB-IP database", "component", "geoip", "path", destPath, "size_mb", fmt.Sprintf("%.1f", float64(written)/1024/1024))
 	return nil
 }

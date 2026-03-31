@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -120,9 +120,9 @@ func (s *Server) Start() error {
 	// HTTP on port 80
 	httpAddr := fmt.Sprintf("%s:%d", s.listenAddr, s.httpPort)
 	go func() {
-		log.Printf("[BlockPage] HTTP server on %s", httpAddr)
+		slog.Info("HTTP server starting", "component", "blockpage", "addr", httpAddr)
 		if err := http.ListenAndServe(httpAddr, mux); err != nil {
-			log.Printf("[BlockPage] HTTP error: %v", err)
+			slog.Error("HTTP server error", "component", "blockpage", "error", err)
 		}
 	}()
 
@@ -135,9 +135,9 @@ func (s *Server) Start() error {
 			TLSConfig: s.tlsConfig.Clone(),
 		}
 		go func() {
-			log.Printf("[BlockPage] HTTPS server on %s", httpsAddr)
+			slog.Info("HTTPS server starting", "component", "blockpage", "addr", httpsAddr)
 			if err := httpsServer.ListenAndServeTLS("", ""); err != nil {
-				log.Printf("[BlockPage] HTTPS error: %v", err)
+				slog.Error("HTTPS server error", "component", "blockpage", "error", err)
 			}
 		}()
 	}

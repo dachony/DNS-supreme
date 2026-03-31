@@ -3,7 +3,7 @@ package mailer
 import (
 	"crypto/tls"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/smtp"
 	"strings"
 	"sync"
@@ -209,7 +209,7 @@ func (m *Mailer) SendSecurityAlert(to, event, details string) error {
 <p style="color:#64748b;font-size:12px">Sent from DNS Supreme</p>`, event, details)
 	err := m.Send(to, "DNS Supreme — Security Alert: "+event, body)
 	if err != nil {
-		log.Printf("[Mailer] Failed to send security alert: %v", err)
+		slog.Error("failed to send security alert", "component", "mailer", "error", err)
 	}
 	return err
 }

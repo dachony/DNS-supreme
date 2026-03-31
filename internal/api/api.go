@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -36,6 +36,7 @@ type Server struct {
 	acmeClient    *certs.ACMEClient
 	emailMFACodes  map[int]emailMFAEntry // userID -> code+expiry
 	blocklistTimer *time.Timer
+	sseHub         *sseHub
 	router         *gin.Engine
 }
 
@@ -62,6 +63,7 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 		mailer:        mailer.New(),
 		acmeClient:    certs.NewACMEClient("/app/certs"),
 		emailMFACodes: make(map[int]emailMFAEntry),
+		sseHub:     newSSEHub(),
 		dnssec:     dnsserver.NewDNSSECManager(),
 		router:     router,
 	}
@@ -76,6 +78,7 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 	s.getClusterFromDB()
 	dnsServer.SetDNSSEC(s.dnssec)
 	s.setupRoutes()
+	go s.broadcastStats()
 	return s
 }
 
@@ -91,9 +94,9 @@ func (s *Server) ensureDefaultAdmin() {
 			Role:         "admin",
 		}
 		if err := s.db.CreateUser(user); err != nil {
-			log.Printf("[API] Failed to create default admin: %v", err)
+			slog.Error("failed to create default admin", "component", "api", "error", err)
 		} else {
-			log.Printf("[API] Default admin user created (username: admin, password: admin) — CHANGE THIS!")
+			slog.Warn("default admin user created, change password immediately", "component", "api", "username", "admin")
 		}
 	}
 }
@@ -136,6 +139,9 @@ func (s *Server) setupRoutes() {
 	// Public auth endpoints
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/mfa-verify", s.mfaVerify)
+
+	// SSE endpoint (manual auth — EventSource can't send headers)
+	api.GET("/events", s.sseHandler)
 
 	// Protected endpoints
 	protected := api.Group("")
@@ -282,7 +288,7 @@ func (s *Server) verifyEmailMFACode(userID int, code string) bool {
 }
 
 func (s *Server) restartServer(c *gin.Context) {
-	log.Println("[API] Server restart requested via API")
+	slog.Info("server restart requested via API", "component", "api")
 	c.JSON(http.StatusOK, gin.H{"status": "restarting"})
 
 	// Graceful restart: signal the process to restart
@@ -298,7 +304,7 @@ func (s *Server) restartServer(c *gin.Context) {
 
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.Port)
-	log.Printf("[API] Web UI and API available at http://%s", addr)
+	slog.Info("web UI and API available", "component", "api", "addr", addr)
 
 	// Restore DNSSEC keys from database
 	s.restoreDNSSECKeys()
@@ -313,7 +319,8 @@ func (s *Server) Start() error {
 
 	go func() {
 		if err := s.router.Run(addr); err != nil {
-			log.Fatalf("[API] Server failed: %v", err)
+			slog.Error("API server failed", "component", "api", "error", err)
+			os.Exit(1)
 		}
 	}()
 	return nil
@@ -817,7 +824,7 @@ func (s *Server) updateBlocklists(c *gin.Context) {
 	go func() {
 		for _, l := range lists {
 			if err := s.filter.UpdateList(l.Name); err != nil {
-				log.Printf("[Filter] Failed to update list '%s': %v", l.Name, err)
+				slog.Error("failed to update blocklist", "component", "filter", "name", l.Name, "error", err)
 				continue
 			}
 			updated := s.filter.GetLists()
@@ -828,7 +835,7 @@ func (s *Server) updateBlocklists(c *gin.Context) {
 				}
 			}
 		}
-		log.Printf("[Filter] Updated %d blocklists", len(lists))
+		slog.Info("updated blocklists", "component", "filter", "count", len(lists))
 	}()
 	c.JSON(http.StatusOK, gin.H{"status": "updating", "count": len(lists)})
 }
@@ -861,21 +868,21 @@ func (s *Server) startBlocklistTimer(hours int) {
 		s.blocklistTimer = nil
 	}
 	if hours <= 0 {
-		log.Println("[Filter] Auto-update disabled")
+		slog.Info("blocklist auto-update disabled", "component", "filter")
 		return
 	}
 	d := time.Duration(hours) * time.Hour
 	s.blocklistTimer = time.AfterFunc(d, func() {
-		log.Printf("[Filter] Auto-update triggered (every %dh)", hours)
+		slog.Info("blocklist auto-update triggered", "component", "filter", "interval_hours", hours)
 		lists := s.filter.GetLists()
 		for _, l := range lists {
 			if err := s.filter.UpdateList(l.Name); err != nil {
-				log.Printf("[Filter] Auto-update failed for '%s': %v", l.Name, err)
+				slog.Error("blocklist auto-update failed", "component", "filter", "name", l.Name, "error", err)
 			}
 		}
 		s.startBlocklistTimer(hours) // re-schedule
 	})
-	log.Printf("[Filter] Auto-update scheduled every %d hours", hours)
+	slog.Info("blocklist auto-update scheduled", "component", "filter", "interval_hours", hours)
 }
 
 func (s *Server) removeBlocklist(c *gin.Context) {

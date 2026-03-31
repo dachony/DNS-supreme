@@ -2,7 +2,7 @@ package dns
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -29,7 +29,7 @@ func (s *Server) handleAXFR(w mdns.ResponseWriter, r *mdns.Msg) {
 
 	clientAddr := w.RemoteAddr().String()
 	if !s.isAXFRAllowed(clientAddr) {
-		log.Printf("[AXFR] Transfer denied for %s (not in allowed IPs)", clientAddr)
+		slog.Warn("AXFR transfer denied", "component", "axfr", "client", clientAddr, "reason", "not in allowed IPs")
 		mdns.HandleFailed(w, r)
 		return
 	}
@@ -47,12 +47,12 @@ func (s *Server) handleAXFR(w mdns.ResponseWriter, r *mdns.Msg) {
 
 	zone, records, err := fn(zoneName)
 	if err != nil || zone == nil {
-		log.Printf("[AXFR] Zone '%s' not found", zoneName)
+		slog.Warn("AXFR zone not found", "component", "axfr", "zone", zoneName)
 		mdns.HandleFailed(w, r)
 		return
 	}
 
-	log.Printf("[AXFR] Transfer requested for zone '%s' (%d records)", zoneName, len(records))
+	slog.Info("AXFR transfer requested", "component", "axfr", "zone", zoneName, "records", len(records))
 
 	// Build SOA record
 	soa := &mdns.SOA{

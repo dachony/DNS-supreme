@@ -4,13 +4,24 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+const (
+	filterCacheSize = 50000
+	filterCacheTTL  = 60 * time.Second
+)
+
+type filterCacheEntry struct {
+	blocked bool
+	rule    string
+	addedAt time.Time
+}
 
 type Category string
 
@@ -48,6 +59,8 @@ type Engine struct {
 	geoLookup          GeoLookupFunc
 	mode               string                // "blocklist" or "allowlist"
 	mu                 sync.RWMutex
+	filterCache        map[string]filterCacheEntry
+	filterCacheMu      sync.RWMutex
 }
 
 // GeoLookupFunc resolves an IP to a country code
@@ -62,6 +75,7 @@ func NewEngine() *Engine {
 		disabledCategories: make(map[Category]bool),
 		geoBlockedCountries: make(map[string]bool),
 		mode:               "blocklist",
+		filterCache:        make(map[string]filterCacheEntry),
 	}
 }
 
@@ -73,8 +87,9 @@ func (e *Engine) GetMode() string {
 
 func (e *Engine) SetMode(mode string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.mode = mode
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) SetGeoLookup(fn GeoLookupFunc) {
@@ -85,6 +100,24 @@ func (e *Engine) SetGeoLookup(fn GeoLookupFunc) {
 
 func (e *Engine) Check(domain string, qtype uint16) (blocked bool, rule string) {
 	domain = strings.TrimSuffix(strings.ToLower(domain), ".")
+
+	// Check filter cache
+	e.filterCacheMu.RLock()
+	if entry, ok := e.filterCache[domain]; ok && time.Since(entry.addedAt) < filterCacheTTL {
+		e.filterCacheMu.RUnlock()
+		return entry.blocked, entry.rule
+	}
+	e.filterCacheMu.RUnlock()
+
+	// Cache result on return
+	defer func() {
+		e.filterCacheMu.Lock()
+		if len(e.filterCache) >= filterCacheSize {
+			e.filterCache = make(map[string]filterCacheEntry)
+		}
+		e.filterCache[domain] = filterCacheEntry{blocked: blocked, rule: rule, addedAt: time.Now()}
+		e.filterCacheMu.Unlock()
+	}()
 
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -131,6 +164,12 @@ func (e *Engine) Check(domain string, qtype uint16) (blocked bool, rule string) 
 	return false, ""
 }
 
+func (e *Engine) clearFilterCache() {
+	e.filterCacheMu.Lock()
+	e.filterCache = make(map[string]filterCacheEntry)
+	e.filterCacheMu.Unlock()
+}
+
 // CheckGeo checks if a client IP should be blocked by geo policy
 func (e *Engine) CheckGeo(clientIP string) (blocked bool, country string) {
 	e.mu.RLock()
@@ -154,14 +193,16 @@ func (e *Engine) CheckGeo(clientIP string) (blocked bool, country string) {
 
 func (e *Engine) EnableCategory(cat Category) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	delete(e.disabledCategories, cat)
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) DisableCategory(cat Category) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.disabledCategories[cat] = true
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) GetCategories() map[Category]bool {
@@ -206,14 +247,16 @@ func (e *Engine) GetGeoBlocked() []string {
 
 func (e *Engine) AddAllowlistDomain(domain string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.allowlist[strings.TrimSuffix(strings.ToLower(domain), ".")] = true
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) RemoveAllowlistDomain(domain string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	delete(e.allowlist, strings.TrimSuffix(strings.ToLower(domain), "."))
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) GetAllowlist() []string {
@@ -230,14 +273,16 @@ func (e *Engine) GetAllowlist() []string {
 
 func (e *Engine) AddCustomBlock(domain, reason string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.customList[strings.TrimSuffix(strings.ToLower(domain), ".")] = reason
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) RemoveCustomBlock(domain string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	delete(e.customList, strings.TrimSuffix(strings.ToLower(domain), "."))
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) GetCustomBlocks() map[string]string {
@@ -297,8 +342,9 @@ func (e *Engine) AddList(name, url string, category Category) error {
 		Count:    count,
 	})
 	e.mu.Unlock()
+	e.clearFilterCache()
 
-	log.Printf("[Filter] Loaded list '%s' [%s] from %s (%d domains)", name, category, url, count)
+	slog.Info("loaded blocklist", "component", "filter", "name", name, "category", string(category), "url", url, "domains", count)
 	return nil
 }
 
@@ -335,14 +381,12 @@ func (e *Engine) UpdateList(name string) error {
 	}
 	e.mu.Unlock()
 
-	log.Printf("[Filter] Updated list '%s' (%d domains)", name, count)
+	slog.Info("updated blocklist", "component", "filter", "name", name, "domains", count)
 	return nil
 }
 
 func (e *Engine) RemoveList(name string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	for d, entry := range e.domains {
 		if entry.listName == name {
 			delete(e.domains, d)
@@ -355,6 +399,8 @@ func (e *Engine) RemoveList(name string) {
 			break
 		}
 	}
+	e.mu.Unlock()
+	e.clearFilterCache()
 }
 
 func (e *Engine) LoadFromFile(path, listName string, category Category) (int, error) {

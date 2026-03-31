@@ -9,7 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/big"
 	"os"
 	"time"
@@ -32,7 +32,7 @@ func LoadOrGenerateTLS(certFile, keyFile string) (*tls.Config, error) {
 	if certFile != "" && keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err == nil {
-			log.Printf("[TLS] Loaded certificate from %s", certFile)
+			slog.Info("loaded certificate", "component", "tls", "cert_file", certFile)
 			return &tls.Config{
 				Certificates: []tls.Certificate{cert},
 				MinVersion:   tls.VersionTLS12,
@@ -41,7 +41,7 @@ func LoadOrGenerateTLS(certFile, keyFile string) (*tls.Config, error) {
 	}
 
 	// Generate self-signed
-	log.Printf("[TLS] Generating self-signed certificate")
+	slog.Info("generating self-signed certificate", "component", "tls")
 	cert, err := generateSelfSigned()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate self-signed cert: %w", err)
@@ -171,6 +171,6 @@ func GenerateAndSave(certFile, keyFile string, req *CertRequest) error {
 	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	keyOut.Close()
 
-	log.Printf("[Certs] Self-signed certificate generated: CN=%s, validity=%d days, SANs=%v", subject.CommonName, validityDays, dnsNames)
+	slog.Info("self-signed certificate generated", "component", "certs", "cn", subject.CommonName, "validity_days", validityDays, "sans", dnsNames)
 	return nil
 }

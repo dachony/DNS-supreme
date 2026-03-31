@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -248,11 +248,11 @@ func (s *Server) Start() error {
 	errCh := make(chan error, 4)
 
 	go func() {
-		log.Printf("[DNS] UDP listener starting on %s", addr)
+		slog.Info("UDP listener starting", "component", "dns", "addr", addr)
 		errCh <- s.udpServer.ListenAndServe()
 	}()
 	go func() {
-		log.Printf("[DNS] TCP listener starting on %s", addr)
+		slog.Info("TCP listener starting", "component", "dns", "addr", addr)
 		errCh <- s.tcpServer.ListenAndServe()
 	}()
 
@@ -266,9 +266,9 @@ func (s *Server) Start() error {
 			Handler:   dns.HandlerFunc(s.handleDoT),
 		}
 		go func() {
-			log.Printf("[DNS] DoT listener starting on %s", dotAddr)
+			slog.Info("DoT listener starting", "component", "dns", "addr", dotAddr)
 			if err := s.dotServer.ListenAndServe(); err != nil {
-				log.Printf("[DNS] DoT error: %v", err)
+				slog.Error("DoT listener error", "component", "dns", "error", err)
 			}
 		}()
 
@@ -282,9 +282,9 @@ func (s *Server) Start() error {
 	case err := <-errCh:
 		return fmt.Errorf("dns server failed: %w", err)
 	case <-time.After(500 * time.Millisecond):
-		log.Printf("[DNS] Server running on %s (UDP+TCP)", addr)
+		slog.Info("server running", "component", "dns", "addr", addr, "protocols", "UDP+TCP")
 		if s.tlsConfig != nil {
-			log.Printf("[DNS] DoT on :853, DoH on :443 (via block page), DoQ on :853/udp")
+			slog.Info("encrypted DNS listeners active", "component", "dns", "dot", ":853", "doh", ":443", "doq", ":853/udp")
 		}
 		return nil
 	}
@@ -385,11 +385,11 @@ func (s *Server) startDoQ() {
 		MaxIdleTimeout: 30 * time.Second,
 	})
 	if err != nil {
-		log.Printf("[DNS] DoQ failed to start: %v", err)
+		slog.Error("DoQ failed to start", "component", "dns", "error", err)
 		return
 	}
 	s.quicLn = ln
-	log.Printf("[DNS] DoQ listener started on %s", doqAddr)
+	slog.Info("DoQ listener started", "component", "dns", "addr", doqAddr)
 
 	ctx := context.Background()
 	for {
@@ -567,7 +567,7 @@ func (s *Server) processDNSMsg(r *dns.Msg, clientAddr string, protocol string) *
 	// Forward
 	resp, upstream, err := s.forward(r)
 	if err != nil {
-		log.Printf("[DNS] Forward error for %s: %v", domain, err)
+		slog.Error("forward error", "component", "dns", "domain", domain, "error", err)
 		return nil
 	}
 

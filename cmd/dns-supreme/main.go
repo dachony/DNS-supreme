@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,15 +19,18 @@ import (
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("=== DNS-supreme v1.0.0 ===")
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+	slog.Info("DNS-supreme starting", "version", "1.0.0")
 
 	cfg := config.LoadFromEnv()
 
 	// Initialize database
 	database, err := db.New(cfg.Database, cfg.Logging)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		slog.Error("failed to initialize database", "error", err)
+		os.Exit(1)
 	}
 	defer database.Close()
 
@@ -44,12 +47,12 @@ func main() {
 	// Initialize GeoIP for country blocking
 	geoReader, err := filter.NewGeoIPReader("/app/data")
 	if err != nil {
-		log.Printf("[GeoIP] Warning: GeoIP not available: %v", err)
-		log.Println("[GeoIP] Country blocking will be disabled. Set GEOIP_DB_PATH or ensure network access for auto-download.")
+		slog.Warn("GeoIP not available", "component", "geoip", "error", err)
+		slog.Info("country blocking disabled, set GEOIP_DB_PATH or ensure network access for auto-download", "component", "geoip")
 	} else {
 		netProtect.SetGeoLookup(geoReader.Lookup)
 		defer geoReader.Close()
-		log.Println("[GeoIP] Country blocking is available")
+		slog.Info("country blocking available", "component", "geoip")
 	}
 
 	// Load persisted network protection settings
@@ -62,7 +65,7 @@ func main() {
 	keyFile := os.Getenv("TLS_KEY_FILE")
 	tlsConfig, err := certs.LoadOrGenerateTLS(certFile, keyFile)
 	if err != nil {
-		log.Printf("[TLS] Warning: TLS not available: %v", err)
+		slog.Warn("TLS not available", "component", "tls", "error", err)
 		tlsConfig = nil
 	}
 
@@ -94,7 +97,7 @@ func main() {
 		var fwds []string
 		if json.Unmarshal([]byte(data), &fwds) == nil && len(fwds) > 0 {
 			dnsServer.SetForwarders(fwds)
-			log.Printf("[Persistence] Restored %d forwarders", len(fwds))
+			slog.Info("restored forwarders", "component", "persistence", "count", len(fwds))
 		}
 	}
 
@@ -141,20 +144,22 @@ func main() {
 	})
 
 	if err := dnsServer.Start(); err != nil {
-		log.Fatalf("Failed to start DNS server: %v", err)
+		slog.Error("failed to start DNS server", "error", err)
+		os.Exit(1)
 	}
 	defer dnsServer.Shutdown()
 
 	// Start API server
 	apiServer := api.NewServer(cfg.API, database, filterEngine, netProtect, blockPageServer, dnsServer)
 	if err := apiServer.Start(); err != nil {
-		log.Fatalf("Failed to start API server: %v", err)
+		slog.Error("failed to start API server", "error", err)
+		os.Exit(1)
 	}
 
 	// Auto-create default primary zone if no zones exist
 	zones, _ := database.ListZones()
 	if len(zones) == 0 {
-		log.Println("[Setup] No zones found, creating default primary zone: dnssupreme.local")
+		slog.Info("no zones found, creating default primary zone", "component", "setup", "zone", "dnssupreme.local")
 		defaultZone := &db.Zone{Name: "dnssupreme.local", Type: "primary", TTL: 3600}
 		if err := database.CreateZone(defaultZone); err == nil {
 			database.CreateRecord(&db.DNSRecord{
@@ -165,28 +170,28 @@ func main() {
 				ZoneID: defaultZone.ID, Name: "@", Type: "NS",
 				Value: "ns1.dnssupreme.local", TTL: 3600,
 			})
-			log.Println("[Setup] Default zone 'dnssupreme.local' created with SOA and NS records")
+			slog.Info("default zone created with SOA and NS records", "component", "setup", "zone", "dnssupreme.local")
 		}
 	}
 
-	log.Println("DNS-supreme is ready!")
+	slog.Info("DNS-supreme is ready")
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	for s := range sig {
 		if s == syscall.SIGHUP {
-			log.Println("[Restart] SIGHUP received — reloading TLS and restarting DNS...")
+			slog.Info("SIGHUP received, reloading TLS and restarting DNS", "component", "restart")
 			// Reload TLS certificates
 			newTLS, err := certs.LoadOrGenerateTLS(certFile, keyFile)
 			if err == nil && newTLS != nil {
 				dnsServer.ReloadTLS(newTLS)
-				log.Println("[Restart] TLS certificates reloaded")
+				slog.Info("TLS certificates reloaded", "component", "restart")
 			}
-			log.Println("[Restart] Restart complete")
+			slog.Info("restart complete", "component", "restart")
 			continue
 		}
-		log.Println("Shutting down gracefully (10s timeout)...")
+		slog.Info("shutting down gracefully", "timeout", "10s")
 		break
 	}
 
@@ -201,9 +206,9 @@ func main() {
 
 	select {
 	case <-done:
-		log.Println("Shutdown complete")
+		slog.Info("shutdown complete")
 	case <-time.After(10 * time.Second):
-		log.Println("Shutdown timed out, forcing exit")
+		slog.Warn("shutdown timed out, forcing exit")
 	}
 }
 
@@ -227,13 +232,13 @@ func loadDefaultBlocklists(engine *filter.Engine) {
 		go func(n string, d listDef) {
 			for i := 0; i < 3; i++ {
 				if err := engine.AddList(n, d.url, d.category); err != nil {
-					log.Printf("[Filter] Failed to load list '%s' (attempt %d): %v", n, i+1, err)
+					slog.Warn("failed to load blocklist", "component", "filter", "name", n, "attempt", i+1, "error", err)
 					time.Sleep(5 * time.Second)
 					continue
 				}
 				return
 			}
-			log.Printf("[Filter] Giving up on list '%s'", n)
+			slog.Error("giving up on blocklist", "component", "filter", "name", n)
 		}(name, def)
 	}
 }
@@ -241,23 +246,23 @@ func loadDefaultBlocklists(engine *filter.Engine) {
 func loadPersistedBlocklists(database *db.Database, engine *filter.Engine) {
 	saved, err := database.GetBlocklistsFull()
 	if err != nil || len(saved) == 0 {
-		log.Println("[Persistence] No saved blocklists, loading defaults")
+		slog.Info("no saved blocklists, loading defaults", "component", "persistence")
 		loadDefaultBlocklists(engine)
 		return
 	}
 
-	log.Printf("[Persistence] Loading %d saved blocklists from database", len(saved))
+	slog.Info("loading saved blocklists from database", "component", "persistence", "count", len(saved))
 	for _, bl := range saved {
 		go func(name, url string, cat string) {
 			for i := 0; i < 3; i++ {
 				if err := engine.AddList(name, url, filter.Category(cat)); err != nil {
-					log.Printf("[Filter] Failed to load list '%s' (attempt %d): %v", name, i+1, err)
+					slog.Warn("failed to load blocklist", "component", "filter", "name", name, "attempt", i+1, "error", err)
 					time.Sleep(5 * time.Second)
 					continue
 				}
 				return
 			}
-			log.Printf("[Filter] Giving up on list '%s'", name)
+			slog.Error("giving up on blocklist", "component", "filter", "name", name)
 		}(bl.Name, bl.URL, bl.Category)
 	}
 }
@@ -270,7 +275,7 @@ func loadPersistedNpSettings(database *db.Database, np *filter.NetProtectEngine)
 			for _, id := range enabled {
 				np.SetCategoryEnabled(id, true)
 			}
-			log.Printf("[Persistence] Restored %d network protection categories", len(enabled))
+			slog.Info("restored network protection categories", "component", "persistence", "count", len(enabled))
 		}
 	}
 
@@ -279,7 +284,7 @@ func loadPersistedNpSettings(database *db.Database, np *filter.NetProtectEngine)
 		var countries []string
 		if json.Unmarshal([]byte(data), &countries) == nil {
 			np.SetGeoBlocked(countries)
-			log.Printf("[Persistence] Restored %d geo-blocked countries", len(countries))
+			slog.Info("restored geo-blocked countries", "component", "persistence", "count", len(countries))
 		}
 	}
 }
@@ -292,7 +297,7 @@ func loadPersistedFilterSettings(database *db.Database, engine *filter.Engine) {
 			for domain, reason := range blocks {
 				engine.AddCustomBlock(domain, reason)
 			}
-			log.Printf("[Persistence] Restored %d custom block rules", len(blocks))
+			slog.Info("restored custom block rules", "component", "persistence", "count", len(blocks))
 		}
 	}
 
@@ -303,7 +308,7 @@ func loadPersistedFilterSettings(database *db.Database, engine *filter.Engine) {
 			for _, domain := range list {
 				engine.AddAllowlistDomain(domain)
 			}
-			log.Printf("[Persistence] Restored %d allowlist entries", len(list))
+			slog.Info("restored allowlist entries", "component", "persistence", "count", len(list))
 		}
 	}
 }

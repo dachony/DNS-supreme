@@ -3,7 +3,7 @@ package filter
 import (
 	"bufio"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -38,11 +38,16 @@ type npCategory struct {
 	meta          NetProtectCategory
 	ips           map[string]bool
 	cidrs         []*net.IPNet
+	matcher       *IPMatcher // fast lookup via sorted prefixes + hash map
 	lastFetchErr  string
 	lastFetchTime time.Time
 }
 
 func (c *npCategory) contains(ip net.IP) bool {
+	if c.matcher != nil {
+		return c.matcher.Contains(ip)
+	}
+	// Fallback to linear scan if matcher not yet built
 	ipStr := ip.String()
 	if c.ips[ipStr] {
 		return true
@@ -322,7 +327,7 @@ func (e *NetProtectEngine) loadCategory(id string) {
 	for _, src := range sources {
 		ips, cidrs, err := fetchIPList(src)
 		if err != nil {
-			log.Printf("[NetProtect] Failed to fetch %s from %s: %v", id, src, err)
+			slog.Warn("failed to fetch threat feed", "component", "netprotect", "category", id, "source", src, "error", err)
 			lastErr = fmt.Sprintf("fetch %s: %v", src, err)
 			continue
 		}
@@ -334,9 +339,20 @@ func (e *NetProtectEngine) loadCategory(id string) {
 
 	total := len(newIPs) + len(newCIDRs)
 
+	// Build fast matcher for O(1) IP and O(log N) CIDR lookups
+	matcher := NewIPMatcher()
+	for ip := range newIPs {
+		matcher.AddIP(ip)
+	}
+	for _, cidr := range newCIDRs {
+		matcher.AddCIDR(cidr)
+	}
+	matcher.Build()
+
 	e.mu.Lock()
 	cat.ips = newIPs
 	cat.cidrs = newCIDRs
+	cat.matcher = matcher
 	cat.meta.EntryCount = total
 	now := time.Now().UTC()
 	cat.meta.LastUpdated = now.Format(time.RFC3339)
@@ -352,7 +368,7 @@ func (e *NetProtectEngine) loadCategory(id string) {
 	}
 	e.mu.Unlock()
 
-	log.Printf("[NetProtect] Loaded %s: %d IPs + %d CIDRs", id, len(newIPs), len(newCIDRs))
+	slog.Info("loaded threat feed", "component", "netprotect", "category", id, "ips", len(newIPs), "cidrs", len(newCIDRs))
 }
 
 // fetchIPList downloads and parses an IP/CIDR list from a URL

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -133,7 +133,7 @@ func (s *Server) deleteCert(c *gin.Context) {
 	keyFile := "/app/certs/server.key"
 	os.Remove(certFile)
 	os.Remove(keyFile)
-	log.Println("[Certs] Server certificate deleted")
+	slog.Info("server certificate deleted", "component", "certs")
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Certificate deleted"})
 }
 
@@ -319,11 +319,11 @@ func (s *Server) requestACMECert(c *gin.Context) {
 		func(fqdn, value string) error {
 			// Find or create zone for this domain
 			// Add TXT record _acme-challenge
-			log.Printf("[ACME] Setting DNS TXT %s = %s", fqdn, value)
+			slog.Info("setting DNS TXT record", "component", "acme", "fqdn", fqdn, "value", value)
 			return s.db.CreateACMERecord(fqdn, value)
 		},
 		func(fqdn string) error {
-			log.Printf("[ACME] Clearing DNS TXT %s", fqdn)
+			slog.Info("clearing DNS TXT record", "component", "acme", "fqdn", fqdn)
 			return s.db.DeleteACMERecord(fqdn)
 		},
 	)
@@ -333,7 +333,7 @@ func (s *Server) requestACMECert(c *gin.Context) {
 
 	go func() {
 		if err := s.acmeClient.RequestCertificate(req.Domain); err != nil {
-			log.Printf("[ACME] Certificate request failed for %s: %v", req.Domain, err)
+			slog.Error("certificate request failed", "component", "acme", "domain", req.Domain, "error", err)
 			errMsg := err.Error()
 			if len(errMsg) > 200 {
 				errMsg = errMsg[:200]

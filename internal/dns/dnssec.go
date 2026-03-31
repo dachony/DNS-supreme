@@ -9,7 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -98,7 +98,7 @@ func (dm *DNSSECManager) GenerateKey(zoneName string) (*DNSSECKey, error) {
 	}
 	dm.mu.Unlock()
 
-	log.Printf("[DNSSEC] Generated key for zone '%s' (tag: %d)", zoneName, keyTag)
+	slog.Info("generated DNSSEC key", "component", "dnssec", "zone", zoneName, "key_tag", keyTag)
 	return &info, nil
 }
 
@@ -143,7 +143,7 @@ func (dm *DNSSECManager) RestoreKey(info DNSSECKey) error {
 	}
 	dm.mu.Unlock()
 
-	log.Printf("[DNSSEC] Restored key for zone '%s' (tag: %d)", zoneName, info.KeyTag)
+	slog.Info("restored DNSSEC key", "component", "dnssec", "zone", zoneName, "key_tag", info.KeyTag)
 	return nil
 }
 
@@ -184,6 +184,29 @@ func (dm *DNSSECManager) SetEnabled(zoneName string, enabled bool) {
 	if kp, ok := dm.keys[zoneName]; ok {
 		kp.info.Enabled = enabled
 	}
+}
+
+// RotateKey generates a new key for a zone, replacing the old one.
+// Returns the new key info.
+func (dm *DNSSECManager) RotateKey(zoneName string) (*DNSSECKey, error) {
+	zoneName = strings.TrimSuffix(zoneName, ".")
+
+	dm.mu.RLock()
+	_, exists := dm.keys[zoneName]
+	dm.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("no existing key for zone %s", zoneName)
+	}
+
+	// Generate new key (this replaces the old one in the map)
+	newKey, err := dm.GenerateKey(zoneName)
+	if err != nil {
+		return nil, fmt.Errorf("rotation failed: %w", err)
+	}
+
+	slog.Info("rotated DNSSEC key", "component", "dnssec", "zone", zoneName, "new_key_tag", newKey.KeyTag)
+	return newKey, nil
 }
 
 func (dm *DNSSECManager) SignResponse(msg *mdns.Msg) *mdns.Msg {
@@ -228,7 +251,7 @@ func (dm *DNSSECManager) SignResponse(msg *mdns.Msg) *mdns.Msg {
 	}
 
 	if err := rrsig.Sign(kp.privKey, msg.Answer); err != nil {
-		log.Printf("[DNSSEC] Sign error: %v", err)
+		slog.Error("DNSSEC sign error", "component", "dnssec", "error", err)
 		return msg
 	}
 
