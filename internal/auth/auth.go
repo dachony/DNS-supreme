@@ -76,6 +76,24 @@ func GenerateEmailCode() string {
 	return fmt.Sprintf("%06d", code)
 }
 
+// GenerateRecoveryCodes creates 8 one-time recovery codes
+func GenerateRecoveryCodes() []string {
+	codes := make([]string, 8)
+	for i := range codes {
+		b := make([]byte, 4)
+		rand.Read(b)
+		codes[i] = fmt.Sprintf("%04x-%04x", binary.BigEndian.Uint16(b[:2]), binary.BigEndian.Uint16(b[2:]))
+	}
+	return codes
+}
+
+// GenerateResetToken creates a URL-safe random token for password reset
+func GenerateResetToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
+}
+
 func TOTPProvisioningURI(secret, username, issuer string) string {
 	return fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=30",
 		issuer, username, secret, issuer)

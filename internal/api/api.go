@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -104,6 +105,7 @@ func (s *Server) ensureDefaultAdmin() {
 func (s *Server) setupRoutes() {
 	// Serve frontend static files
 	s.router.Static("/assets", "/app/web/dist/assets")
+	s.router.Static("/uploads", "/app/data/uploads")
 	s.router.NoRoute(func(c *gin.Context) {
 		c.File("/app/web/dist/index.html")
 	})
@@ -139,123 +141,138 @@ func (s *Server) setupRoutes() {
 	// Public auth endpoints
 	api.POST("/auth/login", s.login)
 	api.POST("/auth/mfa-verify", s.mfaVerify)
+	api.POST("/auth/forgot-password", s.forgotPassword)
+	api.POST("/auth/reset-password", s.resetPassword)
 
 	// SSE endpoint (manual auth — EventSource can't send headers)
 	api.GET("/events", s.sseHandler)
 
-	// Protected endpoints
+	// Protected endpoints (authenticated users — viewers + admins)
 	protected := api.Group("")
 	protected.Use(auth.AuthMiddleware())
 	{
+		// === Viewer-safe routes (read-only) ===
+
+		// Dashboard & monitoring
 		protected.GET("/stats", s.getStats)
 		protected.GET("/logs", s.getLogs)
 		protected.GET("/status", s.getStatus)
 		protected.GET("/system-metrics", s.getSystemMetrics)
-		s.setupLogRoutes(protected)
 
-		// Blocklists
+		// Blocklists (read)
 		protected.GET("/blocklists", s.getBlocklists)
-		protected.POST("/blocklists", s.addBlocklist)
-		protected.POST("/blocklists/update", s.updateBlocklists)
-		protected.GET("/blocklists/schedule", s.getBlocklistSchedule)
-		protected.PUT("/blocklists/schedule", s.setBlocklistSchedule)
-		protected.DELETE("/blocklists/:name", s.removeBlocklist)
 		protected.GET("/blocklists/:name/domains", s.getBlocklistDomains)
 
-		// Custom blocks
+		// Custom blocks & allowlist (read)
 		protected.GET("/custom-blocks", s.getCustomBlocks)
-		protected.POST("/custom-blocks", s.addCustomBlock)
-		protected.DELETE("/custom-blocks/:domain", s.removeCustomBlock)
-
-		// Allowlist
 		protected.GET("/allowlist", s.getAllowlist)
-		protected.POST("/allowlist", s.addAllowlist)
-		protected.DELETE("/allowlist/:domain", s.removeAllowlist)
 
-		// Categories
+		// Categories & geo-blocking (read)
 		protected.GET("/categories", s.getCategories)
-		protected.PUT("/categories/:name", s.toggleCategory)
-
-		// Geo-blocking
 		protected.GET("/geo-blocked", s.getGeoBlocked)
-		protected.PUT("/geo-blocked", s.setGeoBlocked)
 
-		// Network protection
-		// Fail2ban & access control
-		protected.GET("/fail2ban", s.getFail2BanStatus)
-		protected.PUT("/fail2ban/settings", s.setFail2BanSettings)
-		protected.DELETE("/fail2ban/unban/:ip", s.unbanIP)
-		protected.PUT("/fail2ban/allowed-ips", s.setAllowedIPs)
-
-		// Server restart
-		protected.POST("/restart", s.restartServer)
-
-		// Mail
-		protected.GET("/mail/settings", s.getMailSettings)
-		protected.PUT("/mail/settings", s.setMailSettings)
-		protected.POST("/mail/test", s.sendTestMail)
-		protected.GET("/mail/notifications", s.getMailNotifications)
-		protected.PUT("/mail/notifications", s.setMailNotifications)
-
+		// Network protection (read)
 		protected.GET("/network-protection", s.getNetProtectCategories)
-		protected.PUT("/network-protection/:id", s.setNetProtectCategory)
 		protected.GET("/network-protection/:id/entries", s.getNetProtectEntries)
 		protected.GET("/network-protection/geo", s.getNetProtectGeo)
-		protected.PUT("/network-protection/geo", s.setNetProtectGeo)
-		protected.POST("/network-protection/refresh", s.refreshNetProtect)
 		protected.GET("/network-protection/settings", s.getNetProtectSettings)
-		protected.PUT("/network-protection/settings", s.setNetProtectSettings)
 
-		// Zones
-		s.setupZoneRoutes(protected)
+		// Fail2ban (read)
+		protected.GET("/fail2ban", s.getFail2BanStatus)
 
-		// Settings
+		// Mail (read)
+		protected.GET("/mail/settings", s.getMailSettings)
+		protected.GET("/mail/notifications", s.getMailNotifications)
+
+		// Settings (read)
 		protected.GET("/settings/blockpage", s.getBlockPageTemplate)
-		protected.PUT("/settings/blockpage", s.setBlockPageTemplate)
 		protected.GET("/settings/forwarders", s.getForwarders)
-		protected.PUT("/settings/forwarders", s.setForwarders)
 		protected.GET("/settings/server", s.getServerSettings)
-		protected.PUT("/settings/server", s.updateServerSettings)
 		protected.GET("/settings/hostname", s.getHostname)
-		protected.PUT("/settings/hostname", s.setHostname)
 		protected.GET("/settings/primary-domain", s.getPrimaryDomain)
-		protected.PUT("/settings/primary-domain", s.setPrimaryDomain)
 		protected.GET("/settings/cluster", s.getCluster)
-		protected.PUT("/settings/cluster", s.setCluster)
-		protected.POST("/settings/cluster/test", s.testClusterPeer)
 		protected.GET("/settings/filtering-mode", s.getFilteringMode)
-		protected.PUT("/settings/filtering-mode", s.setFilteringMode)
 
-		// Certificate management
+		// Certificates (read)
 		protected.GET("/certs", s.getCerts)
-		protected.GET("/certs/zones", s.getCertZones)
-		protected.POST("/certs/generate", s.generateSelfSigned)
-		protected.DELETE("/certs", s.deleteCert)
-		protected.POST("/certs/upload", s.uploadCert)
-		protected.GET("/certs/export", s.exportCert)
-		protected.GET("/acme/config", s.getACMEConfig)
-		protected.GET("/acme/status/:domain", s.getACMEStatus)
-		protected.PUT("/acme/config", s.setACMEConfig)
-		protected.POST("/acme/request", s.requestACMECert)
 
-		// DNSSEC
-		s.setupDNSSECRoutes(protected)
-		s.setupBackupRoutes(protected)
-
-		// Per-device policies
-		s.setupPolicyRoutes(protected)
-
-		// Current user
+		// Current user (own account management)
 		protected.GET("/auth/me", s.getMe)
 		protected.PUT("/auth/password", s.changePassword)
 		protected.POST("/auth/mfa/setup", s.setupMFA)
 		protected.POST("/auth/mfa/enable", s.enableMFA)
 		protected.DELETE("/auth/mfa", s.disableMFA)
 
-		// User management (admin only)
+		// Sub-route groups with viewer/admin split
+		// (GET routes registered on protected, write routes on admin below)
+
+		// === Admin-only routes (all write/config operations) ===
 		admin := protected.Group("")
 		admin.Use(auth.AdminOnly())
 		{
+			// Blocklists (write)
+			admin.POST("/blocklists", s.addBlocklist)
+			admin.POST("/blocklists/update", s.updateBlocklists)
+			admin.GET("/blocklists/schedule", s.getBlocklistSchedule)
+			admin.PUT("/blocklists/schedule", s.setBlocklistSchedule)
+			admin.DELETE("/blocklists/:name", s.removeBlocklist)
+
+			// Custom blocks (write)
+			admin.POST("/custom-blocks", s.addCustomBlock)
+			admin.DELETE("/custom-blocks/:domain", s.removeCustomBlock)
+
+			// Allowlist (write)
+			admin.POST("/allowlist", s.addAllowlist)
+			admin.DELETE("/allowlist/:domain", s.removeAllowlist)
+
+			// Categories (write)
+			admin.PUT("/categories/:name", s.toggleCategory)
+
+			// Geo-blocking (write)
+			admin.PUT("/geo-blocked", s.setGeoBlocked)
+
+			// Network protection (write)
+			admin.PUT("/network-protection/:id", s.setNetProtectCategory)
+			admin.PUT("/network-protection/geo", s.setNetProtectGeo)
+			admin.POST("/network-protection/refresh", s.refreshNetProtect)
+			admin.PUT("/network-protection/settings", s.setNetProtectSettings)
+
+			// Fail2ban (write)
+			admin.PUT("/fail2ban/settings", s.setFail2BanSettings)
+			admin.DELETE("/fail2ban/unban/:ip", s.unbanIP)
+			admin.PUT("/fail2ban/allowed-ips", s.setAllowedIPs)
+
+			// Server restart
+			admin.POST("/restart", s.restartServer)
+
+			// Mail (write)
+			admin.PUT("/mail/settings", s.setMailSettings)
+			admin.POST("/mail/test", s.sendTestMail)
+			admin.PUT("/mail/notifications", s.setMailNotifications)
+
+			// Settings (write)
+			admin.PUT("/settings/blockpage", s.setBlockPageTemplate)
+			admin.POST("/settings/blockpage/upload-logo", s.uploadBlockPageLogo)
+			admin.PUT("/settings/forwarders", s.setForwarders)
+			admin.PUT("/settings/server", s.updateServerSettings)
+			admin.PUT("/settings/hostname", s.setHostname)
+			admin.PUT("/settings/primary-domain", s.setPrimaryDomain)
+			admin.PUT("/settings/cluster", s.setCluster)
+			admin.POST("/settings/cluster/test", s.testClusterPeer)
+			admin.PUT("/settings/filtering-mode", s.setFilteringMode)
+
+			// Certificate management (write + admin-only reads)
+			admin.GET("/certs/zones", s.getCertZones)
+			admin.POST("/certs/generate", s.generateSelfSigned)
+			admin.DELETE("/certs", s.deleteCert)
+			admin.POST("/certs/upload", s.uploadCert)
+			admin.GET("/certs/export", s.exportCert)
+			admin.GET("/acme/config", s.getACMEConfig)
+			admin.GET("/acme/status/:domain", s.getACMEStatus)
+			admin.PUT("/acme/config", s.setACMEConfig)
+			admin.POST("/acme/request", s.requestACMECert)
+
+			// User management
 			admin.GET("/audit-logs", s.getAuditLogs)
 			admin.GET("/users", s.listUsers)
 			admin.POST("/users", s.createUser)
@@ -263,6 +280,13 @@ func (s *Server) setupRoutes() {
 			admin.DELETE("/users/:id", s.deleteUser)
 			admin.PUT("/users/:id/password", s.resetUserPassword)
 		}
+
+		// Sub-route groups: viewer GET routes on protected, write routes on admin
+		s.setupLogRoutes(protected, admin)
+		s.setupZoneRoutes(protected, admin)
+		s.setupDNSSECRoutes(protected, admin)
+		s.setupPolicyRoutes(protected, admin)
+		s.setupBackupRoutes(admin)
 	}
 }
 
@@ -463,6 +487,23 @@ func (s *Server) mfaVerify(c *gin.Context) {
 	} else {
 		verified = auth.VerifyTOTP(user.MFASecret, req.Code)
 	}
+	// Check recovery codes as fallback
+	if !verified {
+		codesStr := s.db.GetRecoveryCodes(user.ID)
+		if codesStr != "" {
+			codes := strings.Split(codesStr, ",")
+			for i, code := range codes {
+				if code == req.Code {
+					verified = true
+					// Remove used code
+					codes = append(codes[:i], codes[i+1:]...)
+					s.db.SetRecoveryCodes(user.ID, strings.Join(codes, ","))
+					break
+				}
+			}
+		}
+	}
+
 	if !verified {
 		s.fail2ban.RecordFail(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid MFA code"})
@@ -576,12 +617,23 @@ func (s *Server) enableMFA(c *gin.Context) {
 	}
 
 	s.db.UpdateUserMFA(user.ID, true, "totp", user.MFASecret)
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "mfa_enabled": true})
+
+	// Generate recovery codes
+	recoveryCodes := auth.GenerateRecoveryCodes()
+	codesStr := strings.Join(recoveryCodes, ",")
+	s.db.SetRecoveryCodes(user.ID, codesStr)
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":         "ok",
+		"mfa_enabled":    true,
+		"recovery_codes": recoveryCodes,
+	})
 }
 
 func (s *Server) disableMFA(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	s.db.UpdateUserMFA(userID.(int), false, "", "")
+	s.db.SetRecoveryCodes(userID.(int), "")
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "mfa_enabled": false})
 }
 
@@ -714,6 +766,88 @@ func (s *Server) resetUserPassword(c *gin.Context) {
 	hash, _ := auth.HashPassword(req.NewPassword)
 	s.db.UpdateUserPassword(id, hash)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+type forgotPasswordReq struct {
+	Email string `json:"email" binding:"required"`
+}
+
+func (s *Server) forgotPassword(c *gin.Context) {
+	var req forgotPasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Always return success to prevent email enumeration
+	defer func() {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "If an account with that email exists, a reset link has been sent."})
+	}()
+
+	user, err := s.db.GetUserByEmail(req.Email)
+	if err != nil || user == nil {
+		return // Don't reveal if email exists
+	}
+
+	token := auth.GenerateResetToken()
+	s.db.CreatePasswordReset(user.ID, token, time.Now().Add(1*time.Hour))
+
+	// Build reset URL
+	scheme := "http"
+	host := c.Request.Host
+	resetURL := fmt.Sprintf("%s://%s/reset-password?token=%s", scheme, host, token)
+
+	// Send email
+	body := fmt.Sprintf(`<h2>DNS Supreme — Password Reset</h2>
+<p>A password reset was requested for account <strong>%s</strong>.</p>
+<p>Click the link below to reset your password. This link expires in 1 hour.</p>
+<p><a href="%s" style="display:inline-block;padding:12px 24px;background:#0ea5e9;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Reset Password</a></p>
+<p style="margin-top:16px;font-size:0.85rem;color:#64748b">If the button doesn't work, copy this URL: %s</p>
+<p style="color:#64748b;font-size:12px">If you didn't request this, ignore this email. Your password will not be changed.</p>`, user.Username, resetURL, resetURL)
+
+	go s.mailer.Send(user.Email, "DNS Supreme — Password Reset", body)
+
+	slog.Info("password reset requested", "component", "auth", "email", req.Email, "username", user.Username)
+}
+
+type resetPasswordReq2 struct {
+	Token       string `json:"token" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
+func (s *Server) resetPassword(c *gin.Context) {
+	var req resetPasswordReq2
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(req.NewPassword) < 6 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password must be at least 6 characters"})
+		return
+	}
+
+	userID, err := s.db.ValidateResetToken(req.Token)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hash, _ := auth.HashPassword(req.NewPassword)
+	s.db.UpdateUserPassword(userID, hash)
+	s.db.MarkResetTokenUsed(req.Token)
+
+	// Audit log
+	user, _ := s.db.GetUserByID(userID)
+	username := "unknown"
+	if user != nil {
+		username = user.Username
+	}
+	s.db.LogAudit(userID, username, "password_reset", "Password reset via email link", c.ClientIP())
+
+	slog.Info("password reset completed", "component", "auth", "user_id", userID)
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Password has been reset. You can now log in."})
 }
 
 func (s *Server) getAuditLogs(c *gin.Context) {

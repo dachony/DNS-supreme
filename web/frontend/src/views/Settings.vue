@@ -8,159 +8,286 @@
 
     <!-- TAB: Server Identity -->
     <div v-if="activeTab === 'identity'" class="tab-content">
-      <p class="section-desc">The hostname identifies this DNS Supreme instance (FQDN). It's used in SOA records and cluster communication.</p>
-      <div class="settings-grid" style="margin-bottom: 12px">
-        <div class="field">
-          <label>Hostname (FQDN)</label>
-          <input v-model="hostname" placeholder="ns1.example.com" />
+      <div class="identity-split">
+        <div class="identity-left">
+          <p class="section-desc">The hostname identifies this DNS Supreme instance (FQDN). It's used in SOA records and cluster communication.</p>
+          <div class="settings-grid" style="margin-bottom: 12px">
+            <div class="field">
+              <label>Hostname (FQDN)</label>
+              <input v-model="hostname" placeholder="ns1.example.com" />
+            </div>
+            <div class="field">
+              <label>Primary Domain</label>
+              <input v-model="primaryDomain" placeholder="example.com" />
+            </div>
+          </div>
+          <p class="section-desc" style="font-size:0.75rem;margin-bottom:8px">Default: <code style="color:var(--accent)">dnssupreme.local</code>. When you change the primary domain, a zone is automatically created for it.</p>
+          <button @click="saveIdentity" class="btn-primary">Save</button>
+          <div v-if="hostnameMsg" class="msg-success">{{ hostnameMsg }}</div>
         </div>
-        <div class="field">
-          <label>Primary Domain</label>
-          <input v-model="primaryDomain" placeholder="example.com" />
+        <div class="identity-right">
+          <div class="hiw-panel">
+            <h4>How Server Identity Works</h4>
+            <div class="hiw-steps">
+              <div class="hiw-step">
+                <span class="hiw-num">1</span>
+                <div><strong>Hostname (FQDN)</strong><br><span class="section-desc">The fully qualified domain name that identifies this DNS server. Used as the MNAME field in SOA records for all zones you host.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">2</span>
+                <div><strong>Primary Domain</strong><br><span class="section-desc">The main domain this server is authoritative for. A DNS zone is automatically created when you set this. NS and SOA records point to your hostname.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">3</span>
+                <div><strong>SOA Record</strong><br><span class="section-desc">Every zone gets a Start of Authority record with your hostname as the primary nameserver and admin@yourdomain as the contact.</span></div>
+              </div>
+            </div>
+            <div class="hiw-tip">
+              <strong>Tip:</strong> Use a real FQDN (e.g. <code>ns1.example.com</code>) if you plan to serve public DNS. For internal use, <code>ns1.dnssupreme.local</code> works fine.
+            </div>
+          </div>
         </div>
       </div>
-      <p class="section-desc" style="font-size:0.75rem;margin-bottom:8px">Default: <code style="color:var(--accent)">dnssupreme.local</code>. When you change the primary domain, a zone is automatically created for it.</p>
-      <button @click="saveIdentity" class="btn-primary">Save</button>
-      <div v-if="hostnameMsg" class="msg-success">{{ hostnameMsg }}</div>
     </div>
 
     <!-- TAB: Clustering -->
     <div v-if="activeTab === 'cluster'" class="tab-content">
-      <p class="section-desc">Connect two DNS Supreme instances as primary and secondary for high availability and zone replication.</p>
+      <div class="identity-split">
+        <div class="identity-left">
+          <p class="section-desc">Connect two DNS Supreme instances as primary and secondary for high availability and zone replication.</p>
 
-      <div class="mode-cards three-col">
-        <div class="mode-card" :class="{ active: cluster.role === 'standalone' }" @click="setClusterRole('standalone')">
-          <div class="mode-icon">1</div>
-          <div class="mode-info">
-            <span class="mode-title">Standalone</span>
-            <span class="mode-desc">Single server, no replication</span>
+          <div class="mode-cards three-col">
+            <div class="mode-card" :class="{ active: cluster.role === 'standalone' }" @click="setClusterRole('standalone')">
+              <div class="mode-icon">1</div>
+              <div class="mode-info">
+                <span class="mode-title">Standalone</span>
+                <span class="mode-desc">Single server, no replication</span>
+              </div>
+            </div>
+            <div class="mode-card" :class="{ active: cluster.role === 'primary' }" @click="setClusterRole('primary')">
+              <div class="mode-icon">P</div>
+              <div class="mode-info">
+                <span class="mode-title">Primary</span>
+                <span class="mode-desc">Authoritative master, pushes zones to secondary</span>
+              </div>
+            </div>
+            <div class="mode-card" :class="{ active: cluster.role === 'secondary' }" @click="setClusterRole('secondary')">
+              <div class="mode-icon">S</div>
+              <div class="mode-info">
+                <span class="mode-title">Secondary</span>
+                <span class="mode-desc">Replica, pulls zones from primary</span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="mode-card" :class="{ active: cluster.role === 'primary' }" @click="setClusterRole('primary')">
-          <div class="mode-icon">P</div>
-          <div class="mode-info">
-            <span class="mode-title">Primary</span>
-            <span class="mode-desc">Authoritative master, pushes zones to secondary</span>
-          </div>
-        </div>
-        <div class="mode-card" :class="{ active: cluster.role === 'secondary' }" @click="setClusterRole('secondary')">
-          <div class="mode-icon">S</div>
-          <div class="mode-info">
-            <span class="mode-title">Secondary</span>
-            <span class="mode-desc">Replica, pulls zones from primary</span>
-          </div>
-        </div>
-      </div>
 
-      <div v-if="cluster.role !== 'standalone'" class="cluster-config">
-        <!-- Peer Status -->
-        <div class="cluster-status-panel" v-if="cluster.peer_address">
-          <div class="cluster-status-header">
-            <span class="cluster-status-dot" :class="clusterPeerStatus"></span>
-            <span class="cluster-status-text">
-              Peer: <strong>{{ cluster.peer_address }}:{{ cluster.peer_port || 53 }}</strong>
-              — {{ clusterPeerStatus === 'online' ? 'Connected' : clusterPeerStatus === 'checking' ? 'Checking...' : 'Unreachable' }}
-            </span>
-            <span v-if="clusterLatency > 0" class="cluster-latency">{{ clusterLatency.toFixed(1) }}ms</span>
-          </div>
-          <button @click="testClusterPeer" :disabled="clusterPeerStatus === 'checking'" class="btn-test-peer">Test Connection</button>
-          <span v-if="clusterError" class="cluster-error">{{ clusterError }}</span>
-        </div>
+          <div v-if="cluster.role !== 'standalone'" class="cluster-config">
+            <!-- Peer Status -->
+            <div class="cluster-status-panel" v-if="cluster.peer_address">
+              <div class="cluster-status-header">
+                <span class="cluster-status-dot" :class="clusterPeerStatus"></span>
+                <span class="cluster-status-text">
+                  Peer: <strong>{{ cluster.peer_address }}:{{ cluster.peer_port || 53 }}</strong>
+                  — {{ clusterPeerStatus === 'online' ? 'Connected' : clusterPeerStatus === 'checking' ? 'Checking...' : 'Unreachable' }}
+                </span>
+                <span v-if="clusterLatency > 0" class="cluster-latency">{{ clusterLatency.toFixed(1) }}ms</span>
+              </div>
+              <button @click="testClusterPeer" :disabled="clusterPeerStatus === 'checking'" class="btn-test-peer">Test Connection</button>
+              <span v-if="clusterError" class="cluster-error">{{ clusterError }}</span>
+            </div>
 
-        <div class="settings-grid">
-          <div class="field">
-            <label>Peer Address</label>
-            <input v-model="cluster.peer_address" placeholder="192.168.1.2 or dns2.example.com" />
-          </div>
-          <div class="field">
-            <label>Peer Port</label>
-            <input v-model.number="cluster.peer_port" type="number" placeholder="53" />
-          </div>
-          <div class="field">
-            <label>Shared Secret</label>
-            <input v-model="cluster.shared_secret" type="password" placeholder="Used for TSIG authentication" />
+            <div class="settings-grid">
+              <div class="field">
+                <label>Peer Address</label>
+                <input v-model="cluster.peer_address" placeholder="192.168.1.2 or dns2.example.com" />
+              </div>
+              <div class="field">
+                <label>Peer Port</label>
+                <input v-model.number="cluster.peer_port" type="number" placeholder="53" />
+              </div>
+              <div class="field">
+                <label>Shared Secret</label>
+                <input v-model="cluster.shared_secret" type="password" placeholder="Used for TSIG authentication" />
+              </div>
+            </div>
+            <div class="sync-options">
+              <label class="checkbox-label"><input type="checkbox" v-model="cluster.sync_zones" /> Sync DNS zones</label>
+              <label class="checkbox-label"><input type="checkbox" v-model="cluster.sync_blocklists" /> Sync blocklists</label>
+              <label class="checkbox-label"><input type="checkbox" v-model="cluster.sync_settings" /> Sync settings</label>
+            </div>
+            <button @click="saveCluster" class="btn-primary" style="margin-top:12px">Save Cluster Settings</button>
+            <div v-if="clusterMsg" class="msg-success">{{ clusterMsg }}</div>
           </div>
         </div>
-        <div class="sync-options">
-          <label class="checkbox-label"><input type="checkbox" v-model="cluster.sync_zones" /> Sync DNS zones</label>
-          <label class="checkbox-label"><input type="checkbox" v-model="cluster.sync_blocklists" /> Sync blocklists</label>
-          <label class="checkbox-label"><input type="checkbox" v-model="cluster.sync_settings" /> Sync settings</label>
+        <div class="identity-right">
+          <div class="hiw-panel">
+            <h4>How Clustering Works</h4>
+            <div class="hiw-steps">
+              <div class="hiw-step">
+                <span class="hiw-num">P</span>
+                <div><strong>Primary Server</strong><br><span class="section-desc">The authoritative master. All zone changes are made here. It pushes zone updates to the secondary via AXFR (zone transfer) protocol.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">S</span>
+                <div><strong>Secondary Server</strong><br><span class="section-desc">A read-only replica. It pulls zone data from the primary on a schedule and when notified of changes via DNS NOTIFY.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">HA</span>
+                <div><strong>High Availability</strong><br><span class="section-desc">Both servers answer DNS queries independently. If the primary goes down, the secondary continues serving cached zones until it comes back.</span></div>
+              </div>
+            </div>
+            <div class="hiw-tip">
+              <strong>Tip:</strong> For best results, deploy primary and secondary on separate networks or data centers. Use the shared secret (TSIG) to authenticate zone transfers.
+            </div>
+          </div>
         </div>
-        <button @click="saveCluster" class="btn-primary" style="margin-top:12px">Save Cluster Settings</button>
-        <div v-if="clusterMsg" class="msg-success">{{ clusterMsg }}</div>
       </div>
     </div>
 
     <!-- TAB: DNS Services -->
     <div v-if="activeTab === 'dns'" class="tab-content">
-      <p class="section-desc">Configure which protocols are enabled and network settings.</p>
+      <div class="identity-split">
+        <div class="identity-left">
+          <p class="section-desc">Configure which protocols are enabled and network settings.</p>
 
-      <div class="subsection">
-        <h4>Protocols</h4>
-        <div class="protocol-grid">
-          <label class="protocol-item" v-for="p in protocols" :key="p.id">
-            <input type="checkbox" v-model="p.enabled" @change="saveServerSettings" />
-            <div class="protocol-info">
-              <span class="protocol-name">{{ p.name }}</span>
-              <span class="protocol-port">{{ p.port }}</span>
-              <span class="protocol-desc">{{ p.desc }}</span>
+          <div class="subsection">
+            <h4>Protocols</h4>
+            <div class="protocol-grid">
+              <label class="protocol-item" v-for="p in protocols" :key="p.id">
+                <input type="checkbox" v-model="p.enabled" @change="saveServerSettings" />
+                <div class="protocol-info">
+                  <span class="protocol-name">{{ p.name }}</span>
+                  <span class="protocol-port">{{ p.port }}</span>
+                  <span class="protocol-desc">{{ p.desc }}</span>
+                </div>
+              </label>
             </div>
-          </label>
-        </div>
-      </div>
+          </div>
 
-      <div class="subsection">
-        <h4>Listener Addresses</h4>
-        <p class="section-desc">Which addresses the DNS server will respond on.</p>
-        <div class="settings-grid">
-          <div class="field">
-            <label>IPv4 Address</label>
-            <input v-model="serverSettings.ipv4" placeholder="0.0.0.0 (all interfaces)" @change="saveServerSettings" />
+          <div class="subsection">
+            <h4>Listener Addresses</h4>
+            <p class="section-desc">Which addresses the DNS server will respond on.</p>
+            <div class="settings-grid">
+              <div class="field">
+                <label>IPv4 Address</label>
+                <input v-model="serverSettings.ipv4" placeholder="0.0.0.0 (all interfaces)" @change="saveServerSettings" />
+              </div>
+              <div class="field">
+                <label>IPv6 Address</label>
+                <input v-model="serverSettings.ipv6" placeholder=":: (all interfaces)" :disabled="!serverSettings.ipv6Enabled" @change="saveServerSettings" />
+              </div>
+              <div class="field">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="serverSettings.ipv6Enabled" @change="saveServerSettings" />
+                  Enable IPv6 support
+                </label>
+              </div>
+            </div>
           </div>
-          <div class="field">
-            <label>IPv6 Address</label>
-            <input v-model="serverSettings.ipv6" placeholder=":: (all interfaces)" :disabled="!serverSettings.ipv6Enabled" @change="saveServerSettings" />
+
+          <div class="subsection">
+            <h4>Cache & TTL</h4>
+            <div class="settings-grid">
+              <div class="field">
+                <label>Cache Size (entries)</label>
+                <input v-model.number="serverSettings.cacheSize" type="number" @change="saveServerSettings" />
+              </div>
+              <div class="field">
+                <label>Default TTL (seconds)</label>
+                <input v-model.number="serverSettings.defaultTTL" type="number" @change="saveServerSettings" />
+              </div>
+              <div class="field">
+                <label>Minimum TTL (seconds)</label>
+                <input v-model.number="serverSettings.minTTL" type="number" @change="saveServerSettings" />
+              </div>
+              <div class="field">
+                <label>Maximum TTL (seconds)</label>
+                <input v-model.number="serverSettings.maxTTL" type="number" @change="saveServerSettings" />
+              </div>
+            </div>
           </div>
-          <div class="field">
+
+          <div class="subsection">
+            <h4>Management Panel HTTPS</h4>
+            <p class="section-desc">Enable HTTPS for the management panel on port 53443.</p>
             <label class="checkbox-label">
-              <input type="checkbox" v-model="serverSettings.ipv6Enabled" @change="saveServerSettings" />
-              Enable IPv6 support
+              <input type="checkbox" v-model="serverSettings.mgmtHTTPS" />
+              Enable HTTPS for management panel
             </label>
+            <div v-if="mgmtHttpsChanged" class="mgmt-https-apply">
+              <p class="section-desc" style="color:var(--warning);margin:8px 0">
+                {{ serverSettings.mgmtHTTPS ? 'HTTPS will be enabled on port 53443.' : 'HTTPS for management panel will be disabled.' }}
+                A server restart is required to apply this change.
+              </p>
+              <div style="display:flex;gap:8px">
+                <button @click="applyMgmtHttps" class="btn-primary">Apply &amp; Restart</button>
+                <button @click="cancelMgmtHttps" class="btn-text">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div v-if="serverMsg" class="msg-success">{{ serverMsg }}</div>
+        </div>
+        <div class="identity-right">
+          <div class="hiw-panel">
+            <h4>Protocols</h4>
+            <div class="hiw-steps">
+              <div class="hiw-step">
+                <span class="hiw-num">53</span>
+                <div><strong>Standard DNS (UDP/TCP)</strong><br><span class="section-desc">The classic protocol. Unencrypted but universally supported. Every device on your network uses this by default.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">853</span>
+                <div><strong>DNS-over-TLS (DoT)</strong><br><span class="section-desc">Encrypted DNS using TLS on a dedicated port. Supported by Android 9+ (Private DNS), systemd-resolved, and many DNS clients.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">443</span>
+                <div><strong>DNS-over-HTTPS (DoH)</strong><br><span class="section-desc">DNS queries sent as HTTPS requests. Supported by all major browsers. Harder to block since it uses the same port as regular web traffic.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">853</span>
+                <div><strong>DNS-over-QUIC (DoQ)</strong><br><span class="section-desc">The newest protocol, built on QUIC/UDP. Lower latency than DoT/DoH thanks to 0-RTT connection setup. Uses port 853/UDP.</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="hiw-panel" style="margin-top:16px">
+            <h4>Listener Addresses</h4>
+            <div class="hiw-steps">
+              <div class="hiw-step">
+                <span class="hiw-num">v4</span>
+                <div><strong>IPv4 Address</strong><br><span class="section-desc"><code>0.0.0.0</code> means the server listens on all network interfaces. Set a specific IP (e.g. <code>192.168.1.1</code>) to restrict which interface handles DNS queries.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">v6</span>
+                <div><strong>IPv6 Address</strong><br><span class="section-desc"><code>::</code> listens on all IPv6 interfaces. Disable if your network doesn't use IPv6 to avoid binding errors.</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="hiw-panel" style="margin-top:16px">
+            <h4>Cache &amp; TTL</h4>
+            <div class="hiw-steps">
+              <div class="hiw-step">
+                <span class="hiw-num">C</span>
+                <div><strong>Cache Size</strong><br><span class="section-desc">Maximum number of DNS responses kept in memory. Larger cache = fewer upstream queries, but uses more RAM. 10,000 entries is good for most networks.</span></div>
+              </div>
+              <div class="hiw-step">
+                <span class="hiw-num">T</span>
+                <div><strong>TTL (Time to Live)</strong><br><span class="section-desc">How long a cached response is valid. <strong>Min TTL</strong> prevents very short upstream TTLs from overwhelming your forwarders. <strong>Max TTL</strong> forces cache refresh even if upstream says to keep it longer.</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="hiw-panel" style="margin-top:16px">
+            <h4>Management Panel</h4>
+            <div class="hiw-steps">
+              <div class="hiw-step">
+                <span class="hiw-num">S</span>
+                <div><strong>HTTPS for Web UI</strong><br><span class="section-desc">Encrypts the connection to this management panel (port 53443). Recommended if you access the panel over untrusted networks. Uses the same TLS certificate configured in the Certificates tab.</span></div>
+              </div>
+            </div>
+            <div class="hiw-tip">
+              <strong>Tip:</strong> After enabling HTTPS, access the panel at <code>https://your-server:53443</code>. The HTTP version on port 5380 stays available as fallback.
+            </div>
           </div>
         </div>
       </div>
-
-      <div class="subsection">
-        <h4>Cache & TTL</h4>
-        <div class="settings-grid">
-          <div class="field">
-            <label>Cache Size (entries)</label>
-            <input v-model.number="serverSettings.cacheSize" type="number" @change="saveServerSettings" />
-          </div>
-          <div class="field">
-            <label>Default TTL (seconds)</label>
-            <input v-model.number="serverSettings.defaultTTL" type="number" @change="saveServerSettings" />
-          </div>
-          <div class="field">
-            <label>Minimum TTL (seconds)</label>
-            <input v-model.number="serverSettings.minTTL" type="number" @change="saveServerSettings" />
-          </div>
-          <div class="field">
-            <label>Maximum TTL (seconds)</label>
-            <input v-model.number="serverSettings.maxTTL" type="number" @change="saveServerSettings" />
-          </div>
-        </div>
-      </div>
-
-      <div class="subsection">
-        <h4>Management Panel HTTPS</h4>
-        <p class="section-desc">Enable HTTPS for the management panel on port 53443.</p>
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="serverSettings.mgmtHTTPS" @change="saveServerSettings" />
-          Enable HTTPS for management panel (requires restart)
-        </label>
-      </div>
-      <div v-if="serverMsg" class="msg-success">{{ serverMsg }}</div>
     </div>
 
     <!-- TAB: DNS Forwarders -->
@@ -603,8 +730,21 @@
 
           <div v-if="bpMode === 'visual'" class="bp-visual">
             <div class="field">
-              <label>Logo URL (optional)</label>
-              <input v-model="bpLogo" placeholder="https://example.com/logo.png or leave empty" @input="updateBpFromVisual" />
+              <label>Logo</label>
+              <div style="display:flex;gap:8px;align-items:start;flex-direction:column">
+                <div style="display:flex;gap:8px;width:100%;align-items:center">
+                  <input v-model="bpLogo" placeholder="https://example.com/logo.png or leave empty" @input="updateBpFromVisual" style="flex:1" />
+                  <label class="btn-upload">
+                    Upload
+                    <input type="file" accept="image/*" @change="uploadLogo" style="display:none" />
+                  </label>
+                </div>
+                <div v-if="bpLogo" style="display:flex;align-items:center;gap:8px">
+                  <img :src="bpLogo" style="max-height:32px;max-width:120px;border-radius:4px;border:1px solid var(--border)" />
+                  <button @click="bpLogo = ''; updateBpFromVisual()" class="btn-text" style="font-size:0.75rem;color:var(--danger)">Remove</button>
+                </div>
+                <span v-if="logoUploading" style="color:var(--text-muted);font-size:0.8rem">Uploading...</span>
+              </div>
             </div>
             <div class="field">
               <label>Heading</label>
@@ -721,6 +861,11 @@
             <option value="none">None (port 25)</option>
           </select>
         </div>
+        <div class="field" style="grid-column: 1/-1">
+          <label>Notification Recipients</label>
+          <p class="section-desc" style="margin-bottom:6px">Comma-separated email addresses to receive notifications. Leave empty to use admin user emails.</p>
+          <input v-model="mailSettings.recipients" placeholder="admin@example.com, ops@example.com" />
+        </div>
       </div>
 
       <div class="section-actions" style="margin-top:16px">
@@ -733,12 +878,28 @@
         <h4>Email Notifications</h4>
         <p class="section-desc">Choose which events trigger email notifications.</p>
         <div class="mail-notif-list">
-          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.securityAlerts" /> Security alerts (failed logins, new admin users)</label>
+          <h5 style="color:var(--text-muted);margin-bottom:8px;font-weight:500">Security</h5>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.securityAlerts" /> Failed login attempts &amp; IP bans</label>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.userChanges" /> User created, deleted, or role changed</label>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.configChanges" /> Settings or policy changes</label>
+
+          <h5 style="color:var(--text-muted);margin:12px 0 8px;font-weight:500">Certificates</h5>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.certExpiry" /> Certificate expiring within 30 days</label>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.certRenewal" /> Certificate renewed or replaced</label>
+
+          <h5 style="color:var(--text-muted);margin:12px 0 8px;font-weight:500">System Health</h5>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.feedErrors" /> Blocklist or threat feed update failures</label>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.highBlockRate" /> Abnormal block rate (&gt;90%)</label>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.diskUsage" /> Disk usage above 85%</label>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.dnsErrors" /> DNS upstream forwarder failures</label>
+
+          <h5 style="color:var(--text-muted);margin:12px 0 8px;font-weight:500">Cluster</h5>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.clusterOffline" /> Cluster peer went offline</label>
+          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.axfrRequests" /> Zone transfer (AXFR) requests</label>
+
+          <h5 style="color:var(--text-muted);margin:12px 0 8px;font-weight:500">Reports</h5>
           <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.dailyReport" /> Daily summary report</label>
           <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.weeklyReport" /> Weekly summary report</label>
-          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.certExpiry" /> Certificate expiry warnings (30 days before)</label>
-          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.feedErrors" /> Blocklist/feed update errors</label>
-          <label class="checkbox-label"><input type="checkbox" v-model="mailNotifs.highBlockRate" /> High block rate alerts (>90%)</label>
         </div>
         <button @click="saveMailSettings" class="btn-primary" style="margin-top:12px">Save Notifications</button>
       </div>
@@ -869,14 +1030,27 @@
           <h3>Setup TOTP: {{ mfaSetupUser.username }}</h3>
           <div v-if="mfaSetup">
             <p class="section-desc">Scan with authenticator app or enter secret manually:</p>
+            <canvas ref="qrCanvas" style="margin:12px auto;display:block;border-radius:8px"></canvas>
             <div class="mfa-secret">{{ mfaSetup.secret }}</div>
-            <p class="mfa-uri">{{ mfaSetup.uri }}</p>
             <form @submit.prevent="enableMFA" class="mfa-verify">
               <input v-model="mfaVerifyCode" placeholder="6-digit code" maxlength="6" />
               <button type="submit" class="btn-primary">Enable</button>
             </form>
             <div v-if="mfaError" class="error-msg" style="margin-top:8px">{{ mfaError }}</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Recovery Codes Modal -->
+      <div v-if="recoveryCodes.length" class="modal-overlay" @click.self="recoveryCodes = []">
+        <div class="edit-modal" style="max-width:420px">
+          <h3>Recovery Codes</h3>
+          <p class="section-desc" style="margin-bottom:12px">Save these codes in a safe place. Each code can only be used once to sign in if you lose access to your authenticator app.</p>
+          <div class="recovery-codes-grid">
+            <code v-for="c in recoveryCodes" :key="c" class="recovery-code">{{ c }}</code>
+          </div>
+          <button @click="copyRecoveryCodes" class="btn-primary" style="margin-top:16px;width:100%">Copy All Codes</button>
+          <button @click="recoveryCodes = []" class="btn-text" style="margin-top:8px;width:100%">I've saved my codes</button>
         </div>
       </div>
 
@@ -969,8 +1143,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, inject, onMounted } from 'vue'
+import { ref, computed, inject, onMounted, nextTick } from 'vue'
 import axios from 'axios'
+import QRCode from 'qrcode'
 import { currentUser } from '../auth'
 
 const confirm = inject('confirm') as (opts: any) => Promise<boolean>
@@ -999,6 +1174,8 @@ const mfaSetup = ref<any>(null)
 const mfaSetupUser = ref<any>(null)
 const mfaVerifyCode = ref('')
 const mfaError = ref('')
+const qrCanvas = ref<HTMLCanvasElement | null>(null)
+const recoveryCodes = ref<string[]>([])
 const userFormError = ref('')
 const userFormSuccess = ref('')
 const currentUsername = currentUser.value?.username || ''
@@ -1118,15 +1295,31 @@ async function setupUserMFA(u: any) {
   try {
     const { data } = await axios.post('/api/auth/mfa/setup')
     mfaSetup.value = data
+    nextTick(() => {
+      if (qrCanvas.value && mfaSetup.value?.uri) {
+        QRCode.toCanvas(qrCanvas.value, mfaSetup.value.uri, {
+          width: 200,
+          margin: 2,
+          color: { dark: '#1e293b', light: '#ffffff' }
+        })
+      }
+    })
   } catch {}
 }
 async function enableMFA() {
   mfaError.value = ''
   try {
-    await axios.post('/api/auth/mfa/enable', { code: mfaVerifyCode.value })
+    const { data } = await axios.post('/api/auth/mfa/enable', { code: mfaVerifyCode.value })
+    if (data.recovery_codes) {
+      recoveryCodes.value = data.recovery_codes
+    }
     mfaSetup.value = null; mfaSetupUser.value = null; mfaVerifyCode.value = ''
     loadUsers(); loadMe()
   } catch (e: any) { mfaError.value = e.response?.data?.error || 'Invalid code' }
+}
+
+function copyRecoveryCodes() {
+  navigator.clipboard.writeText(recoveryCodes.value.join('\n'))
 }
 async function disableUserMFA(u: any) {
   if (!await confirm({ title: 'Disable MFA', message: `Disable TOTP for "${u.username}"?`, confirmText: 'Disable', danger: true })) return
@@ -1176,6 +1369,8 @@ const serverSettings = ref({
   mgmtHTTPS: false,
 })
 const serverMsg = ref('')
+const mgmtHttpsOriginal = ref(false)
+const mgmtHttpsChanged = computed(() => serverSettings.value.mgmtHTTPS !== mgmtHttpsOriginal.value)
 
 const forwarders = ref<any[]>([])
 const newForwarder = ref('')
@@ -1269,11 +1464,15 @@ const dnssecZone = ref('')
 // --- Mail ---
 const mailSettings = ref({
   host: '', port: 587, username: '', password: '',
-  from: '', fromName: 'DNS Supreme', encryption: 'starttls'
+  from: '', fromName: 'DNS Supreme', encryption: 'starttls',
+  recipients: ''
 })
 const mailNotifs = ref({
-  securityAlerts: true, dailyReport: false, weeklyReport: false,
-  certExpiry: true, feedErrors: true, highBlockRate: false
+  securityAlerts: true, userChanges: false, configChanges: false,
+  certExpiry: true, certRenewal: false,
+  feedErrors: true, highBlockRate: false, diskUsage: false, dnsErrors: false,
+  clusterOffline: true, axfrRequests: false,
+  dailyReport: false, weeklyReport: false,
 })
 const mailMsg = ref('')
 
@@ -1435,6 +1634,7 @@ const bpHeading = ref('Access Blocked')
 const bpMessage = ref('Access to this page has been blocked by your network administrator.')
 const bpFooter = ref('Protected by DNS Supreme')
 const bpColor = ref('#ef4444')
+const logoUploading = ref(false)
 
 const bpPreviewHTML = computed(() => {
   const html = blockPageHTML.value || generateVisualHTML()
@@ -1468,6 +1668,37 @@ h1{font-size:1.5rem;color:#f1f5f9;margin-bottom:12px}
   ${bpFooter.value ? `<div class="footer">${bpFooter.value}</div>` : ''}
 </div>
 </body></html>`
+}
+
+async function uploadLogo(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files?.length) return
+
+  const file = input.files[0]
+  if (file.size > 2 * 1024 * 1024) {
+    bpMsg.value = 'Logo file too large (max 2MB)'
+    setTimeout(() => bpMsg.value = '', 3000)
+    return
+  }
+
+  logoUploading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('logo', file)
+    const { data } = await axios.post('/api/settings/blockpage/upload-logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    bpLogo.value = data.url
+    updateBpFromVisual()
+    bpMsg.value = 'Logo uploaded'
+    setTimeout(() => bpMsg.value = '', 3000)
+  } catch (e: any) {
+    bpMsg.value = 'Upload failed: ' + (e.response?.data?.error || e.message)
+    setTimeout(() => bpMsg.value = '', 3000)
+  } finally {
+    logoUploading.value = false
+    input.value = '' // reset file input
+  }
 }
 
 function updateBpFromVisual() {
@@ -1508,6 +1739,14 @@ async function loadAll() {
   dnssecKeys.value = dk.data || []
   certInfo.value = certs.data
   blockPageHTML.value = bp.data.html || ''
+  if (bp.data.settings) {
+    const s = bp.data.settings
+    if (s.logo) bpLogo.value = s.logo
+    if (s.heading) bpHeading.value = s.heading
+    if (s.message) bpMessage.value = s.message
+    if (s.footer) bpFooter.value = s.footer
+    if (s.color) bpColor.value = s.color
+  }
   hostname.value = hn.data.hostname || 'ns1.dnssupreme.local'
   primaryDomain.value = pd.data.domain || 'dnssupreme.local'
   cluster.value = cl.data || cluster.value
@@ -1529,6 +1768,7 @@ async function loadAll() {
   serverSettings.value.minTTL = ss.data.min_ttl || 10
   serverSettings.value.maxTTL = ss.data.max_ttl || 86400
   serverSettings.value.mgmtHTTPS = ss.data.management_https || false
+  mgmtHttpsOriginal.value = serverSettings.value.mgmtHTTPS
 }
 
 async function saveServerSettings() {
@@ -1547,6 +1787,26 @@ async function saveServerSettings() {
   })
   serverMsg.value = 'Settings saved. Some changes require a restart.'
   setTimeout(() => serverMsg.value = '', 4000)
+}
+
+async function applyMgmtHttps() {
+  await saveServerSettings()
+  mgmtHttpsOriginal.value = serverSettings.value.mgmtHTTPS
+  serverMsg.value = 'Restarting server...'
+  try {
+    await axios.post('/api/restart')
+    serverMsg.value = serverSettings.value.mgmtHTTPS
+      ? 'HTTPS enabled. Panel available at https://...:53443 after restart.'
+      : 'HTTPS disabled. Restart in progress.'
+    setTimeout(() => serverMsg.value = '', 6000)
+  } catch {
+    serverMsg.value = 'Settings saved but restart failed. Restart manually.'
+    setTimeout(() => serverMsg.value = '', 5000)
+  }
+}
+
+function cancelMgmtHttps() {
+  serverSettings.value.mgmtHTTPS = mgmtHttpsOriginal.value
 }
 
 async function saveIdentity() {
@@ -1723,7 +1983,16 @@ function formatDate(d: string) {
 async function saveBlockPage() {
   bpMsg.value = ''
   const html = blockPageHTML.value || generateVisualHTML()
-  await axios.put('/api/settings/blockpage', { html })
+  await axios.put('/api/settings/blockpage', {
+    html,
+    settings: {
+      logo: bpLogo.value,
+      heading: bpHeading.value,
+      message: bpMessage.value,
+      footer: bpFooter.value,
+      color: bpColor.value,
+    }
+  })
   bpMsg.value = 'Block page saved'
   setTimeout(() => bpMsg.value = '', 3000)
 }
@@ -1773,6 +2042,23 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 </script>
 
 <style scoped>
+.btn-upload {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.btn-upload:hover {
+  background: var(--accent);
+  color: #fff;
+}
 .settings-page h2 { margin-bottom: 16px; font-size: 1.5rem; }
 
 /* Tabs */
@@ -1813,6 +2099,20 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 .mfa-off { color: var(--text-muted); font-size: 0.85rem; }
 .mfa-status { display: flex; align-items: center; gap: 16px; }
 .mfa-setup p { margin-bottom: 8px; }
+.recovery-codes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.recovery-code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  text-align: center;
+  letter-spacing: 1px;
+}
 .mfa-secret { font-family: monospace; font-size: 1.1rem; color: #f59e0b; background: var(--bg-input); padding: 12px; border-radius: 8px; margin-bottom: 8px; word-break: break-all; }
 .mfa-uri { font-size: 0.75rem; color: var(--text-dim); word-break: break-all; margin-bottom: 12px; }
 .mfa-verify { display: flex; gap: 8px; }
@@ -2241,4 +2541,60 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 .users-left table tbody tr:hover { background: var(--bg-input); }
 .users-left table td.username { color: var(--text-primary); font-weight: 600; }
 .users-left table td.actions { white-space: nowrap; }
+
+/* Identity split + HIW panels */
+.identity-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.identity-left { }
+.identity-right { }
+
+.hiw-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+.hiw-panel h4 { margin-bottom: 16px; color: var(--text); }
+.hiw-steps { display: flex; flex-direction: column; gap: 14px; }
+.hiw-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.hiw-num {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.hiw-step strong { color: var(--text); font-size: 0.9rem; }
+.hiw-step .section-desc { font-size: 0.8rem; margin-top: 2px; }
+.hiw-tip {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--bg-hover);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.hiw-tip strong { color: var(--accent); }
+.mgmt-https-apply {
+  margin-top: 10px;
+  padding: 12px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 8px;
+}
+.hiw-tip code { color: var(--accent); background: var(--bg); padding: 1px 4px; border-radius: 3px; }
+
+@media (max-width: 768px) {
+  .identity-split { grid-template-columns: 1fr; }
+}
 </style>

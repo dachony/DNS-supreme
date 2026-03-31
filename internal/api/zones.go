@@ -10,21 +10,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) setupZoneRoutes(protected *gin.RouterGroup) {
-	zones := protected.Group("/zones")
+func (s *Server) setupZoneRoutes(viewer, admin *gin.RouterGroup) {
+	// Read-only zone routes (viewer-safe)
+	viewZones := viewer.Group("/zones")
 	{
-		zones.GET("", s.listZones)
-		zones.POST("", s.createZone)
-		zones.GET("/:id", s.getZone)
-		zones.DELETE("/:id", s.deleteZone)
+		viewZones.GET("", s.listZones)
+		viewZones.GET("/:id", s.getZone)
+		viewZones.GET("/:id/records", s.listRecords)
+		viewZones.GET("/:id/export", s.exportZone)
+	}
 
-		zones.GET("/:id/records", s.listRecords)
-		zones.POST("/:id/records", s.createRecord)
-		zones.PUT("/:id/records/:rid", s.updateRecord)
-		zones.DELETE("/:id/records/:rid", s.deleteRecord)
-		zones.GET("/:id/export", s.exportZone)
-
-		zones.POST("/ptr", s.createPTRRecord)
+	// Write zone routes (admin-only)
+	adminZones := admin.Group("/zones")
+	{
+		adminZones.POST("", s.createZone)
+		adminZones.DELETE("/:id", s.deleteZone)
+		adminZones.POST("/:id/records", s.createRecord)
+		adminZones.PUT("/:id/records/:rid", s.updateRecord)
+		adminZones.DELETE("/:id/records/:rid", s.deleteRecord)
+		adminZones.POST("/ptr", s.createPTRRecord)
 	}
 }
 

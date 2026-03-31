@@ -19,6 +19,7 @@
         <button type="submit" :disabled="loading" class="btn-login">
           {{ loading ? 'Signing in...' : 'Sign In' }}
         </button>
+        <router-link to="/reset-password" class="forgot-link">Forgot password?</router-link>
       </form>
 
       <!-- MFA Form -->
@@ -136,4 +137,15 @@ async function handleMFA() {
 }
 
 .mfa-info { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px; }
+
+.forgot-link {
+  display: block;
+  text-align: center;
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.forgot-link:hover { color: var(--accent); }
 </style>

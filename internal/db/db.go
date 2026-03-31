@@ -226,6 +226,15 @@ func (d *Database) migrate() error {
 	// Add columns if missing (for upgrades)
 	d.db.Exec("ALTER TABLE query_log ADD COLUMN IF NOT EXISTS protocol VARCHAR(10) DEFAULT ''")
 	d.db.Exec("ALTER TABLE query_log ADD COLUMN IF NOT EXISTS client_hostname VARCHAR(255) DEFAULT ''")
+	d.db.Exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes TEXT DEFAULT ''")
+	d.db.Exec(`CREATE TABLE IF NOT EXISTS password_resets (
+		id SERIAL PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		token VARCHAR(255) NOT NULL UNIQUE,
+		expires_at TIMESTAMPTZ NOT NULL,
+		used BOOLEAN NOT NULL DEFAULT FALSE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`)
 	return d.migrateZones()
 }
 

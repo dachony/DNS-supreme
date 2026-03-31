@@ -124,8 +124,65 @@ func (d *Database) DeleteUser(id int) error {
 	return nil
 }
 
+func (d *Database) SetRecoveryCodes(userID int, codes string) error {
+	_, err := d.db.Exec("UPDATE users SET recovery_codes = $1, updated_at = NOW() WHERE id = $2", codes, userID)
+	return err
+}
+
+func (d *Database) GetRecoveryCodes(userID int) string {
+	var codes string
+	d.db.QueryRow("SELECT COALESCE(recovery_codes, '') FROM users WHERE id = $1", userID).Scan(&codes)
+	return codes
+}
+
 func (d *Database) UserCount() int {
 	var count int
 	d.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
 	return count
+}
+
+func (d *Database) CreatePasswordReset(userID int, token string, expiresAt time.Time) error {
+	// Delete old unused tokens for this user
+	d.db.Exec("DELETE FROM password_resets WHERE user_id = $1 AND used = FALSE", userID)
+	_, err := d.db.Exec(
+		"INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)",
+		userID, token, expiresAt,
+	)
+	return err
+}
+
+func (d *Database) ValidateResetToken(token string) (int, error) {
+	var userID int
+	var expiresAt time.Time
+	var used bool
+	err := d.db.QueryRow(
+		"SELECT user_id, expires_at, used FROM password_resets WHERE token = $1",
+		token,
+	).Scan(&userID, &expiresAt, &used)
+	if err != nil {
+		return 0, fmt.Errorf("invalid token")
+	}
+	if used {
+		return 0, fmt.Errorf("token already used")
+	}
+	if time.Now().After(expiresAt) {
+		return 0, fmt.Errorf("token expired")
+	}
+	return userID, nil
+}
+
+func (d *Database) MarkResetTokenUsed(token string) {
+	d.db.Exec("UPDATE password_resets SET used = TRUE WHERE token = $1", token)
+}
+
+func (d *Database) GetUserByEmail(email string) (*User, error) {
+	var u User
+	err := d.db.QueryRow(
+		"SELECT id, username, password_hash, first_name, last_name, email, role, mfa_enabled, mfa_type, mfa_secret, created_at, updated_at, last_login FROM users WHERE email = $1",
+		email,
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.MFAEnabled, &u.MFAType, &u.MFASecret, &u.CreatedAt, &u.UpdatedAt, &u.LastLogin)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
 }

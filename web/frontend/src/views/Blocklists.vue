@@ -15,26 +15,26 @@
             <h3>Filtering Categories</h3>
             <p class="section-desc">Enable or disable domain blocking categories.</p>
             <div class="svc-list">
-              <div v-for="cat in categories" :key="cat.name" class="svc-item" :class="{ disabled: !cat.enabled }" @click="toggleCategory(cat)">
+              <div v-for="cat in categories" :key="cat.name" class="svc-item" :class="{ disabled: !cat.enabled }" @click="isAdmin && toggleCategory(cat)" :style="!isAdmin ? 'cursor: default' : ''">
                 <span class="svc-icon">{{ categoryIcon(cat.name) }}</span>
                 <div class="svc-info">
                   <span class="svc-name">{{ cat.name }}</span>
                   <span class="svc-count">{{ cat.domains?.toLocaleString() || 0 }} domains</span>
                 </div>
-                <div class="toggle" :class="{ on: cat.enabled }"><div class="toggle-knob"></div></div>
+                <div class="toggle" :class="{ on: cat.enabled, disabled: !isAdmin }"><div class="toggle-knob"></div></div>
               </div>
             </div>
           </div>
 
           <div class="services-section">
             <h3>Network Protection</h3>
-            <div class="svc-item master" :class="{ disabled: !npEnabled }" @click="toggleNpMaster">
+            <div class="svc-item master" :class="{ disabled: !npEnabled }" @click="isAdmin && toggleNpMaster()" :style="!isAdmin ? 'cursor: default' : ''">
               <span class="svc-icon svc-icon-np">NP</span>
               <div class="svc-info">
                 <span class="svc-name">Network Protection</span>
                 <span class="svc-count">Tor, botnets, malicious IPs, Spamhaus, URLhaus</span>
               </div>
-              <div class="toggle" :class="{ on: npEnabled }"><div class="toggle-knob"></div></div>
+              <div class="toggle" :class="{ on: npEnabled, disabled: !isAdmin }"><div class="toggle-knob"></div></div>
             </div>
           </div>
 
@@ -71,7 +71,7 @@
 
     <!-- TAB: Active Lists -->
     <div v-if="activeTab === 'lists'" class="tab-content">
-      <div class="al-toolbar">
+      <div class="al-toolbar" v-if="isAdmin">
         <div class="add-form" style="flex:1;margin-bottom:0">
           <input v-model="newName" placeholder="List name..." />
           <input v-model="newUrl" placeholder="URL (hosts file, domain list, GitHub raw)..." class="url-input" />
@@ -96,7 +96,7 @@
             :class="{ active: activeListFilter === cat }" @click="activeListFilter = activeListFilter === cat ? '' : cat"
             class="catalog-filter-btn">{{ cat }} <span class="filter-count">{{ activeListCategoryCounts[cat] || 0 }}</span></button>
         </div>
-        <div class="al-schedule-inline">
+        <div class="al-schedule-inline" v-if="isAdmin">
           <button @click="updateAllLists" :disabled="updatingLists" class="btn-update-now">
             {{ updatingLists ? 'Updating...' : 'Update Now' }}
           </button>
@@ -120,7 +120,7 @@
             <span class="al-row-url">{{ list.url }}</span>
           </div>
           <span class="al-row-count">{{ list.count?.toLocaleString() }} domains</span>
-          <button @click.stop="removeList(list.name)" class="btn-delete-row" title="Delete">Delete</button>
+          <button v-if="isAdmin" @click.stop="removeList(list.name)" class="btn-delete-row" title="Delete">Delete</button>
         </div>
         <div v-if="!lists.length" class="empty">No blocklists configured — add one above or browse the Community Blocklists tab.</div>
         <div v-else-if="!filteredActiveLists.length" class="empty">No lists match the selected category.</div>
@@ -171,7 +171,7 @@
               class="catalog-filter-btn">{{ cat }}</button>
           </div>
         </div>
-        <div class="community-actions">
+        <div class="community-actions" v-if="isAdmin">
           <span v-if="newCatalogCount > 0" class="new-count-badge">{{ newCatalogCount }} available</span>
           <button @click="checkForUpdates" :disabled="catalogAdding === 'checking'" class="btn-check-updates">
             {{ catalogAdding === 'checking' ? 'Checking...' : 'Check for Updates' }}
@@ -196,7 +196,7 @@
               </div>
               <span class="catalog-item-desc">{{ item.description }}</span>
             </div>
-            <button v-if="!isListAdded(item.name)" @click="addFromCatalog(item)" :disabled="catalogAdding === item.name" class="btn-catalog-add">
+            <button v-if="isAdmin && !isListAdded(item.name)" @click="addFromCatalog(item)" :disabled="catalogAdding === item.name" class="btn-catalog-add">
               {{ catalogAdding === item.name ? 'Adding...' : 'Add' }}
             </button>
             <span v-else class="catalog-added-badge">Added</span>
@@ -219,7 +219,7 @@
           <div class="ti-card-formats" v-if="ti.formats">
             <span class="ti-format" v-for="f in ti.formats" :key="f">{{ f }}</span>
           </div>
-          <div class="ti-add-form">
+          <div class="ti-add-form" v-if="isAdmin">
             <input v-model="tiFeedUrls[ti.id]" :placeholder="ti.placeholder" />
             <input v-model="tiFeedApiKeys[ti.id]" placeholder="API key (if required)" class="ti-apikey-input" />
             <button @click="addTiFeed(ti)" :disabled="!tiFeedUrls[ti.id]" class="btn-catalog-add">Add Feed</button>
@@ -232,7 +232,7 @@
     <!-- TAB: Custom Feeds -->
     <div v-if="activeTab === 'custom'" class="tab-content">
       <p class="section-desc">Add any blocklist or threat feed by URL. Supports hosts files, domain lists, and AdBlock filter lists.</p>
-      <div class="ti-card ti-card-custom" style="margin-bottom: 16px">
+      <div v-if="isAdmin" class="ti-card ti-card-custom" style="margin-bottom: 16px">
         <div class="ti-card-header">
           <span class="ti-card-name">Add Custom Feed</span>
         </div>
@@ -256,14 +256,14 @@
         <div class="rules-col">
           <h3 class="rules-title allow-title">Global Allowlist</h3>
           <p class="section-desc">Always allowed — overrides all blocklists.</p>
-          <div class="add-form compact">
+          <div v-if="isAdmin" class="add-form compact">
             <input v-model="allowDomain" placeholder="Domain to allow..." />
             <button @click="addAllow" :disabled="!allowDomain" class="btn-add allow">Allow</button>
           </div>
           <div class="lists">
             <div v-for="domain in allowlist" :key="domain" class="list-item">
               <span class="list-name">{{ domain }}</span>
-              <button @click="removeAllow(domain)" class="btn-remove">Remove</button>
+              <button v-if="isAdmin" @click="removeAllow(domain)" class="btn-remove">Remove</button>
             </div>
             <div v-if="!allowlist.length" class="empty-small">No entries</div>
           </div>
@@ -271,7 +271,7 @@
         <div class="rules-col">
           <h3 class="rules-title block-title">Custom Block Rules</h3>
           <p class="section-desc">Manually blocked domains.</p>
-          <div class="add-form compact">
+          <div v-if="isAdmin" class="add-form compact">
             <input v-model="customDomain" placeholder="Domain to block..." />
             <input v-model="customReason" placeholder="Reason..." />
             <button @click="addCustom" :disabled="!customDomain" class="btn-add">Block</button>
@@ -282,7 +282,7 @@
                 <span class="list-name">{{ domain }}</span>
                 <span class="list-url" v-if="reason">{{ reason }}</span>
               </div>
-              <button @click="removeCustom(domain as string)" class="btn-remove">Unblock</button>
+              <button v-if="isAdmin" @click="removeCustom(domain as string)" class="btn-remove">Unblock</button>
             </div>
             <div v-if="!Object.keys(customBlocks).length" class="empty-small">No custom blocks</div>
           </div>
@@ -290,7 +290,7 @@
         <div class="rules-col wide">
           <h3 class="rules-title policy-title">Per-Device Policies</h3>
           <p class="section-desc">Override rules for specific devices by IP.</p>
-          <div class="add-form compact">
+          <div v-if="isAdmin" class="add-form compact">
             <input v-model="newPolicy.client_ip" placeholder="Device IP..." />
             <input v-model="newPolicy.name" placeholder="Name..." />
             <button @click="addPolicy" :disabled="!newPolicy.client_ip" class="btn-add">Add Device</button>
@@ -299,35 +299,35 @@
             <div class="policy-header">
               <span class="policy-ip">{{ p.client_ip }}</span>
               <span class="policy-name" v-if="p.name">{{ p.name }}</span>
-              <button @click="removePolicy(p.client_ip)" class="btn-remove">Remove</button>
+              <button v-if="isAdmin" @click="removePolicy(p.client_ip)" class="btn-remove">Remove</button>
             </div>
             <div class="policy-row">
               <span class="policy-label">Disable categories:</span>
               <div class="cat-toggles">
                 <label v-for="cat in allPolicyCats" :key="cat" class="cat-check">
-                  <input type="checkbox" :checked="p.disabled_categories?.[cat]" @change="togglePolicyCat(p, cat, $event)" />
+                  <input type="checkbox" :checked="p.disabled_categories?.[cat]" @change="togglePolicyCat(p, cat, $event)" :disabled="!isAdmin" />
                   <span>{{ policyCatLabel(cat) }}</span>
                 </label>
               </div>
             </div>
             <div class="policy-row">
               <span class="policy-label">Extra blocks:</span>
-              <div class="inline-add">
+              <div v-if="isAdmin" class="inline-add">
                 <input v-model="policyBlockDomain[p.client_ip]" placeholder="domain.com" @keyup.enter="addPolicyBlock(p)" />
                 <button @click="addPolicyBlock(p)" class="btn-add">Block</button>
               </div>
               <div class="tag-list" v-if="Object.keys(p.custom_blocks || {}).length">
-                <span v-for="(_, domain) in (p.custom_blocks || {})" :key="domain" class="tag blocked-tag">{{ domain }}<button @click="removePolicyBlock(p, domain as string)">&times;</button></span>
+                <span v-for="(_, domain) in (p.custom_blocks || {})" :key="domain" class="tag blocked-tag">{{ domain }}<button v-if="isAdmin" @click="removePolicyBlock(p, domain as string)">&times;</button></span>
               </div>
             </div>
             <div class="policy-row">
               <span class="policy-label">Allowed (override):</span>
-              <div class="inline-add">
+              <div v-if="isAdmin" class="inline-add">
                 <input v-model="policyAllowDomain[p.client_ip]" placeholder="domain.com" @keyup.enter="addPolicyAllow(p)" />
                 <button @click="addPolicyAllow(p)" class="btn-add allow">Allow</button>
               </div>
               <div class="tag-list" v-if="Object.keys(p.custom_allows || {}).length">
-                <span v-for="(_, domain) in (p.custom_allows || {})" :key="domain" class="tag allow-tag">{{ domain }}<button @click="removePolicyAllow(p, domain as string)">&times;</button></span>
+                <span v-for="(_, domain) in (p.custom_allows || {})" :key="domain" class="tag allow-tag">{{ domain }}<button v-if="isAdmin" @click="removePolicyAllow(p, domain as string)">&times;</button></span>
               </div>
             </div>
           </div>
@@ -340,7 +340,7 @@
     <div v-if="activeTab === 'netprotect'" class="tab-content">
       <div class="np-toolbar">
         <p class="section-desc" style="margin-bottom:0; flex:1">Block DNS responses whose destination IPs resolve to threat networks.</p>
-        <div class="np-toolbar-actions">
+        <div class="np-toolbar-actions" v-if="isAdmin">
           <div class="np-interval">
             <span class="np-interval-label">Auto-refresh:</span>
             <select v-model="npRefreshMinutes" @change="saveNpInterval" class="np-interval-select">
@@ -366,7 +366,7 @@
             </div>
             <div class="np-card-right">
               <span v-if="cat.entry_count" class="np-card-count">{{ cat.entry_count.toLocaleString() }} entries</span>
-              <div class="toggle" :class="{ on: cat.enabled }" @click="toggleNpCategory(cat)">
+              <div class="toggle" :class="{ on: cat.enabled, disabled: !isAdmin }" @click="isAdmin && toggleNpCategory(cat)">
                 <div class="toggle-knob"></div>
               </div>
             </div>
@@ -400,7 +400,7 @@
       <div class="np-geo">
         <h4>Country Blocking</h4>
         <p class="section-desc">Block DNS responses that resolve to IPs in specific countries via GeoIP lookup.</p>
-        <div class="geo-search-wrap">
+        <div class="geo-search-wrap" v-if="isAdmin">
           <input v-model="geoSearch" placeholder="Search countries..." @focus="geoDropdownOpen = true" class="geo-search-input" />
           <div v-if="geoDropdownOpen && filteredCountries.length" class="geo-dropdown">
             <div v-for="c in filteredCountries" :key="c.code" class="geo-dropdown-item"
@@ -416,7 +416,7 @@
           <span v-for="cc in geoBlocked" :key="cc" class="geo-tag">
             <span class="geo-tag-flag">{{ countryFlag(cc) }}</span>
             {{ countryName(cc) }} ({{ cc }})
-            <button @click="removeGeoCountry(cc)" class="geo-remove">&times;</button>
+            <button v-if="isAdmin" @click="removeGeoCountry(cc)" class="geo-remove">&times;</button>
           </span>
         </div>
         <div v-else class="empty-small">No countries blocked</div>
@@ -428,8 +428,10 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, inject } from 'vue'
 import axios from 'axios'
+import { currentUser } from '../auth'
 
 const confirm = inject('confirm') as (opts: any) => Promise<boolean>
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
 
 // --- Tabs ---
 const activeTab = ref('services')

@@ -101,8 +101,8 @@
         <button v-if="!mfaSetup" @click="setupMFA" class="btn-create">Setup TOTP</button>
         <div v-else class="mfa-setup">
           <p>Scan this code with your authenticator app or enter the secret manually:</p>
+          <canvas ref="qrCanvas" style="margin:12px auto;display:block;border-radius:8px"></canvas>
           <div class="mfa-secret">{{ mfaSetup.secret }}</div>
-          <p class="mfa-uri">{{ mfaSetup.uri }}</p>
           <form @submit.prevent="enableMFA" class="mfa-verify">
             <input v-model="mfaVerifyCode" placeholder="Enter 6-digit code" maxlength="6" />
             <button type="submit" class="btn-create">Enable MFA</button>
@@ -111,12 +111,26 @@
         </div>
       </div>
     </div>
+
+    <!-- Recovery Codes Modal -->
+    <div v-if="recoveryCodes.length" class="modal-overlay" @click.self="recoveryCodes = []">
+      <div class="modal-box" style="max-width:420px">
+        <h3>Recovery Codes</h3>
+        <p class="recovery-desc">Save these codes in a safe place. Each code can only be used once to sign in if you lose access to your authenticator app.</p>
+        <div class="recovery-codes-grid">
+          <code v-for="c in recoveryCodes" :key="c" class="recovery-code">{{ c }}</code>
+        </div>
+        <button @click="copyRecoveryCodes" class="btn-create" style="margin-top:16px;width:100%">Copy All Codes</button>
+        <button @click="recoveryCodes = []" class="btn-cancel" style="margin-top:8px;width:100%">I've saved my codes</button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, inject, onMounted } from 'vue'
+import { ref, inject, onMounted, nextTick } from 'vue'
 import axios from 'axios'
+import QRCode from 'qrcode'
 import { currentUser } from '../auth'
 
 const confirm = inject('confirm') as (opts: any) => Promise<boolean>
@@ -127,6 +141,8 @@ const editing = ref<any>(null)
 const mfaSetup = ref<any>(null)
 const mfaVerifyCode = ref('')
 const mfaError = ref('')
+const qrCanvas = ref<HTMLCanvasElement | null>(null)
+const recoveryCodes = ref<string[]>([])
 const formError = ref('')
 const formSuccess = ref('')
 
@@ -179,18 +195,34 @@ async function deleteUser(u: any) {
 async function setupMFA() {
   const { data } = await axios.post('/api/auth/mfa/setup')
   mfaSetup.value = data
+  nextTick(() => {
+    if (qrCanvas.value && mfaSetup.value?.uri) {
+      QRCode.toCanvas(qrCanvas.value, mfaSetup.value.uri, {
+        width: 200,
+        margin: 2,
+        color: { dark: '#1e293b', light: '#ffffff' }
+      })
+    }
+  })
 }
 
 async function enableMFA() {
   mfaError.value = ''
   try {
-    await axios.post('/api/auth/mfa/enable', { code: mfaVerifyCode.value })
+    const { data } = await axios.post('/api/auth/mfa/enable', { code: mfaVerifyCode.value })
+    if (data.recovery_codes) {
+      recoveryCodes.value = data.recovery_codes
+    }
     mfaSetup.value = null
     mfaVerifyCode.value = ''
     loadMe()
   } catch (e: any) {
     mfaError.value = e.response?.data?.error || 'Invalid code'
   }
+}
+
+function copyRecoveryCodes() {
+  navigator.clipboard.writeText(recoveryCodes.value.join('\n'))
 }
 
 async function disableMFA() {
@@ -289,6 +321,28 @@ td { padding: 10px 8px; font-size: 0.9rem; }
   background: rgba(34,197,94,0.1); border: 1px solid #22c55e; color: #22c55e;
   padding: 8px 12px; border-radius: 6px; margin-top: 8px; font-size: 0.85rem;
 }
+
+.recovery-desc { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 12px; }
+.recovery-codes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.recovery-code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  text-align: center;
+  letter-spacing: 1px;
+}
+.modal-box {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 24px; width: 420px; max-width: 90vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+}
+.modal-box h3 { color: var(--text-primary); margin-bottom: 16px; }
 
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex;

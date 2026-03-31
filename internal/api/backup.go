@@ -23,9 +23,9 @@ type zoneBackup struct {
 	Records []db.DNSRecord `json:"records"`
 }
 
-func (s *Server) setupBackupRoutes(protected *gin.RouterGroup) {
-	protected.GET("/backup/export", s.exportBackup)
-	protected.POST("/backup/restore", s.restoreBackup)
+func (s *Server) setupBackupRoutes(admin *gin.RouterGroup) {
+	admin.GET("/backup/export", s.exportBackup)
+	admin.POST("/backup/restore", s.restoreBackup)
 }
 
 func (s *Server) exportBackup(c *gin.Context) {

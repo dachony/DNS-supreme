@@ -183,10 +183,10 @@
         </div>
 
         <div class="modal-actions">
-          <button v-if="selectedLog.blocked" @click="addToAllowlist(selectedLog.domain)" class="btn-allow">
+          <button v-if="isAdmin && selectedLog.blocked" @click="addToAllowlist(selectedLog.domain)" class="btn-allow">
             Add to Allowlist
           </button>
-          <button v-if="!selectedLog.blocked" @click="addToBlocklist(selectedLog.domain)" class="btn-block">
+          <button v-if="isAdmin && !selectedLog.blocked" @click="addToBlocklist(selectedLog.domain)" class="btn-block">
             Add to Blocklist
           </button>
           <button @click="filterByClient(selectedLog.client_ip)" class="btn-filter">
@@ -202,8 +202,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
+import { currentUser } from '../auth'
+
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
 
 const logs = ref<any[]>([])
 const total = ref(0)

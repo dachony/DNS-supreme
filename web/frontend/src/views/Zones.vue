@@ -3,7 +3,7 @@
     <h2>DNS Zones</h2>
 
     <!-- Create Zone -->
-    <div class="section" v-if="!selectedZone">
+    <div class="section" v-if="isAdmin && !selectedZone">
       <h3>Create New Zone</h3>
       <div class="zone-mode-toggle">
         <button type="button" :class="{ active: zoneMode === 'forward' }" @click="zoneMode = 'forward'">Forward Zone</button>
@@ -76,8 +76,8 @@
             <span class="zone-row-meta">{{ z.record_count }} records &middot; SOA {{ z.soa_serial }} &middot; TTL {{ z.ttl }}s</span>
           </div>
           <button @click.stop="exportZone(z)" class="zone-row-export-btn" title="Export zone file">Export</button>
-          <button v-if="z.name !== primaryDomain" @click.stop="setAsPrimary(z)" class="zone-row-primary-btn" title="Set as primary domain">Set Primary</button>
-          <button @click.stop="deleteZone(z)" class="zone-row-delete-btn">Delete</button>
+          <button v-if="isAdmin && z.name !== primaryDomain" @click.stop="setAsPrimary(z)" class="zone-row-primary-btn" title="Set as primary domain">Set Primary</button>
+          <button v-if="isAdmin" @click.stop="deleteZone(z)" class="zone-row-delete-btn">Delete</button>
         </div>
       </div>
     </div>
@@ -98,7 +98,7 @@
         <span>TTL: <strong>{{ selectedZone.ttl }}s</strong></span>
         <span>Type: <strong>{{ selectedZone.type === 'primary' ? 'Primary' : 'Secondary' }}</strong></span>
         <span>Records: <strong>{{ userRecords.length }}</strong></span>
-        <div class="zone-info-actions" v-if="!selectedZone.name.includes('arpa')">
+        <div class="zone-info-actions" v-if="isAdmin && !selectedZone.name.includes('arpa')">
           <button @click="createSubdomainZone" class="btn-link">+ Subdomain Zone</button>
           <button v-if="!hasMatchingReverse" @click="createReverseForZone" class="btn-link">+ Reverse Zone</button>
           <span v-if="matchingReverseZone" class="zone-link" @click="selectZone(matchingReverseZone)">Reverse: {{ matchingReverseZone.name }}</span>
@@ -136,7 +136,7 @@
             </div>
           </div>
 
-          <div class="zone-cert-actions">
+          <div v-if="isAdmin" class="zone-cert-actions">
             <button @click="generateZoneSelfSigned" class="btn-primary">Generate Self-Signed</button>
             <button @click="requestZoneAcmeCert" class="btn-primary" :disabled="!acmeConfigured || acmeRequesting">
               {{ acmeRequesting ? 'Requesting...' : 'Request Let\'s Encrypt' }}
@@ -150,7 +150,7 @@
       <!-- DNS Records -->
       <div class="section">
         <h3>DNS Records</h3>
-        <form class="record-form" @submit.prevent="addRecord">
+        <form v-if="isAdmin" class="record-form" @submit.prevent="addRecord">
           <div class="form-row">
             <div class="field rec-name-field">
               <label>Name</label>
@@ -183,7 +183,7 @@
 
         <table class="records-table">
           <thead>
-            <tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Priority</th><th></th></tr>
+            <tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Priority</th><th v-if="isAdmin"></th></tr>
           </thead>
           <tbody>
             <tr v-for="r in userRecords" :key="r.id">
@@ -208,7 +208,7 @@
                 <td class="rec-value">{{ r.value }}</td>
                 <td>{{ r.ttl }}</td>
                 <td>{{ r.priority || '' }}</td>
-                <td class="action-cell">
+                <td v-if="isAdmin" class="action-cell">
                   <button @click="startEdit(r)" class="btn-rec-edit" title="Edit">Edit</button>
                   <button @click="deleteRecord(r)" class="btn-rec-delete" title="Delete">Delete</button>
                 </td>
@@ -251,8 +251,8 @@
             <h4>DNSSEC Signing</h4>
             <div v-if="zoneDNSSEC">
               <div class="dnssec-status">
-                <div class="toggle-wrap" @click="toggleZoneDNSSEC">
-                  <div class="toggle" :class="{ on: zoneDNSSEC.enabled }"><div class="toggle-knob"></div></div>
+                <div class="toggle-wrap" @click="isAdmin && toggleZoneDNSSEC()">
+                  <div class="toggle" :class="{ on: zoneDNSSEC.enabled, disabled: !isAdmin }"><div class="toggle-knob"></div></div>
                   <span>{{ zoneDNSSEC.enabled ? 'Zone signing active' : 'Signing disabled' }}</span>
                 </div>
               </div>
@@ -272,11 +272,11 @@
                 </div>
                 <p class="section-desc">Add the DS record above to your domain registrar to complete DNSSEC chain of trust.</p>
               </div>
-              <button @click="removeZoneDNSSEC" class="btn-text-danger">Remove DNSSEC key</button>
+              <button v-if="isAdmin" @click="removeZoneDNSSEC" class="btn-text-danger">Remove DNSSEC key</button>
             </div>
             <div v-else>
               <p class="section-desc">This zone is not signed. Enable DNSSEC to protect against DNS spoofing.</p>
-              <button @click="signZone" class="btn-primary">Enable DNSSEC Signing</button>
+              <button v-if="isAdmin" @click="signZone" class="btn-primary">Enable DNSSEC Signing</button>
             </div>
           </div>
         </div>
@@ -288,8 +288,10 @@
 <script setup lang="ts">
 import { ref, computed, inject, onMounted } from 'vue'
 import axios from 'axios'
+import { currentUser } from '../auth'
 
 const confirm = inject('confirm') as (opts: any) => Promise<boolean>
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
 
 const zones = ref<any[]>([])
 const selectedZone = ref<any>(null)

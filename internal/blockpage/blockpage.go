@@ -115,6 +115,7 @@ func (s *Server) Start() error {
 	if s.dohHandler != nil {
 		mux.Handle("/dns-query", s.dohHandler)
 	}
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("/app/data/uploads"))))
 	mux.HandleFunc("/", s.handleBlock)
 
 	// HTTP on port 80

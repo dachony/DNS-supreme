@@ -10,7 +10,7 @@
         <li><router-link to="/zones" active-class="active"><span class="nav-icon nav-icon-zones"></span>DNS Zones</router-link></li>
         <li><router-link to="/blocklists" active-class="active"><span class="nav-icon nav-icon-filter"></span>DNS Filtering</router-link></li>
         <li><router-link to="/logs" active-class="active"><span class="nav-icon nav-icon-logs"></span>Query Log</router-link></li>
-        <li><router-link to="/settings" active-class="active"><span class="nav-icon nav-icon-settings"></span>Settings</router-link></li>
+        <li v-if="currentUser?.role === 'admin'"><router-link to="/settings" active-class="active"><span class="nav-icon nav-icon-settings"></span>Settings</router-link></li>
       </ul>
       <div class="sidebar-bottom">
         <div class="status" v-if="status">

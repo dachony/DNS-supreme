@@ -9,15 +9,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) setupDNSSECRoutes(protected *gin.RouterGroup) {
-	dnssec := protected.Group("/dnssec")
+func (s *Server) setupDNSSECRoutes(viewer, admin *gin.RouterGroup) {
+	// Read-only DNSSEC routes (viewer-safe)
+	viewDnssec := viewer.Group("/dnssec")
 	{
-		dnssec.GET("", s.listDNSSECKeys)
-		dnssec.POST("/generate", s.generateDNSSECKey)
-		dnssec.GET("/:zone", s.getDNSSECKey)
-		dnssec.PUT("/:zone", s.toggleDNSSEC)
-		dnssec.DELETE("/:zone", s.deleteDNSSECKey)
-		dnssec.POST("/:zone/rotate", s.rotateDNSSECKey)
+		viewDnssec.GET("", s.listDNSSECKeys)
+		viewDnssec.GET("/:zone", s.getDNSSECKey)
+	}
+
+	// Write DNSSEC routes (admin-only)
+	adminDnssec := admin.Group("/dnssec")
+	{
+		adminDnssec.POST("/generate", s.generateDNSSECKey)
+		adminDnssec.PUT("/:zone", s.toggleDNSSEC)
+		adminDnssec.DELETE("/:zone", s.deleteDNSSECKey)
+		adminDnssec.POST("/:zone/rotate", s.rotateDNSSECKey)
 	}
 }
 

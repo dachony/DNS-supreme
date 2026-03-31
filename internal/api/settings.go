@@ -1,13 +1,30 @@
 package api
 
 import (
+	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
+// Block page visual settings stored as JSON
+type blockPageSettings struct {
+	Logo    string `json:"logo"`
+	Heading string `json:"heading"`
+	Message string `json:"message"`
+	Footer  string `json:"footer"`
+	Color   string `json:"color"`
+}
+
 type blockPageReq struct {
-	HTML string `json:"html" binding:"required"`
+	HTML     string             `json:"html"`
+	Settings *blockPageSettings `json:"settings,omitempty"`
 }
 
 func (s *Server) getBlockPageTemplate(c *gin.Context) {
@@ -19,7 +36,17 @@ func (s *Server) getBlockPageTemplate(c *gin.Context) {
 	if html == "" {
 		html = s.db.GetSetting("block_page_html")
 	}
-	c.JSON(http.StatusOK, gin.H{"html": html})
+
+	// Load visual settings
+	var settings blockPageSettings
+	if data := s.db.GetSetting("block_page_visual"); data != "" {
+		json.Unmarshal([]byte(data), &settings)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"html":     html,
+		"settings": settings,
+	})
 }
 
 func (s *Server) setBlockPageTemplate(c *gin.Context) {
@@ -32,12 +59,81 @@ func (s *Server) setBlockPageTemplate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "block page server not available"})
 		return
 	}
-	if err := s.blockPage.SetCustomTemplate(req.HTML); err != nil {
+
+	html := req.HTML
+	if html == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "html is required"})
+		return
+	}
+
+	if err := s.blockPage.SetCustomTemplate(html); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	s.db.SetSetting("block_page_html", req.HTML)
+	s.db.SetSetting("block_page_html", html)
+
+	// Save visual settings if provided
+	if req.Settings != nil {
+		if data, err := json.Marshal(req.Settings); err == nil {
+			s.db.SetSetting("block_page_visual", string(data))
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) uploadBlockPageLogo(c *gin.Context) {
+	file, header, err := c.Request.FormFile("logo")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no file uploaded"})
+		return
+	}
+	defer file.Close()
+
+	// Validate file type
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	allowed := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".svg": true, ".gif": true, ".webp": true, ".ico": true}
+	if !allowed[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file type, allowed: png, jpg, svg, gif, webp, ico"})
+		return
+	}
+
+	// Limit to 2MB
+	if header.Size > 2*1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file too large, max 2MB"})
+		return
+	}
+
+	// Ensure upload dir exists
+	uploadDir := "/app/data/uploads"
+	os.MkdirAll(uploadDir, 0755)
+
+	// Save with timestamp to avoid caching issues
+	filename := "logo_" + strings.ReplaceAll(time.Now().Format("20060102_150405"), " ", "") + ext
+	destPath := filepath.Join(uploadDir, filename)
+
+	dest, err := os.Create(destPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
+		return
+	}
+	defer dest.Close()
+	io.Copy(dest, file)
+
+	// Clean up old logos
+	entries, _ := os.ReadDir(uploadDir)
+	for _, e := range entries {
+		if e.Name() != filename && strings.HasPrefix(e.Name(), "logo_") {
+			os.Remove(filepath.Join(uploadDir, e.Name()))
+		}
+	}
+
+	logoURL := "/uploads/" + filename
+	s.db.SetSetting("block_page_logo", logoURL)
+
+	slog.Info("block page logo uploaded", "component", "api", "file", filename, "size", header.Size)
+
+	c.JSON(http.StatusOK, gin.H{"url": logoURL})
 }
 
 func (s *Server) LoadBlockPageTemplate() {

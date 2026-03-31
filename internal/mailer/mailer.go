@@ -17,15 +17,23 @@ type Config struct {
 	From       string `json:"from"`
 	FromName   string `json:"from_name"`
 	Encryption string `json:"encryption"` // "starttls", "ssl", "none"
+	Recipients string `json:"recipients"`
 }
 
 type NotifConfig struct {
 	SecurityAlerts bool `json:"security_alerts"`
-	DailyReport    bool `json:"daily_report"`
-	WeeklyReport   bool `json:"weekly_report"`
+	UserChanges    bool `json:"user_changes"`
+	ConfigChanges  bool `json:"config_changes"`
 	CertExpiry     bool `json:"cert_expiry"`
+	CertRenewal    bool `json:"cert_renewal"`
 	FeedErrors     bool `json:"feed_errors"`
 	HighBlockRate  bool `json:"high_block_rate"`
+	DiskUsage      bool `json:"disk_usage"`
+	DnsErrors      bool `json:"dns_errors"`
+	ClusterOffline bool `json:"cluster_offline"`
+	AxfrRequests   bool `json:"axfr_requests"`
+	DailyReport    bool `json:"daily_report"`
+	WeeklyReport   bool `json:"weekly_report"`
 }
 
 type Mailer struct {
@@ -45,6 +53,7 @@ func New() *Mailer {
 			SecurityAlerts: true,
 			CertExpiry:     true,
 			FeedErrors:     true,
+			ClusterOffline: true,
 		},
 	}
 }
@@ -198,6 +207,39 @@ func (m *Mailer) SendMFACode(to, code string) error {
 	return m.Send(to, "DNS Supreme — Verification Code", body)
 }
 
+// GetRecipients returns the notification recipient list.
+// Falls back to the From address if no recipients are configured.
+func (m *Mailer) GetRecipients() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.cfg.Recipients != "" {
+		parts := strings.Split(m.cfg.Recipients, ",")
+		var result []string
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				result = append(result, p)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	if m.cfg.From != "" {
+		return []string{m.cfg.From}
+	}
+	return nil
+}
+
+// SendToAll sends an email to all configured recipients.
+func (m *Mailer) SendToAll(subject, body string) {
+	for _, to := range m.GetRecipients() {
+		if err := m.Send(to, subject, body); err != nil {
+			slog.Error("failed to send notification", "component", "mailer", "to", to, "error", err)
+		}
+	}
+}
+
 // SendSecurityAlert sends a security notification
 func (m *Mailer) SendSecurityAlert(to, event, details string) error {
 	if !m.notif.SecurityAlerts {
@@ -207,9 +249,58 @@ func (m *Mailer) SendSecurityAlert(to, event, details string) error {
 <p><strong>Event:</strong> %s</p>
 <p><strong>Details:</strong> %s</p>
 <p style="color:#64748b;font-size:12px">Sent from DNS Supreme</p>`, event, details)
-	err := m.Send(to, "DNS Supreme — Security Alert: "+event, body)
-	if err != nil {
-		slog.Error("failed to send security alert", "component", "mailer", "error", err)
+
+	// Send to specific address if provided, otherwise to all recipients
+	if to != "" {
+		err := m.Send(to, "DNS Supreme — Security Alert: "+event, body)
+		if err != nil {
+			slog.Error("failed to send security alert", "component", "mailer", "error", err)
+		}
+		return err
 	}
-	return err
+	m.SendToAll("DNS Supreme — Security Alert: "+event, body)
+	return nil
+}
+
+func (m *Mailer) SendCertRenewal(domain string) {
+	if !m.notif.CertRenewal {
+		return
+	}
+	body := fmt.Sprintf(`<h2>DNS Supreme — Certificate Renewed</h2>
+<p>The TLS certificate for <strong>%s</strong> has been successfully renewed.</p>
+<p style="color:#64748b;font-size:12px">Sent from DNS Supreme</p>`, domain)
+	m.SendToAll("DNS Supreme — Certificate Renewed: "+domain, body)
+}
+
+func (m *Mailer) SendClusterOffline(peerAddr string) {
+	if !m.notif.ClusterOffline {
+		return
+	}
+	body := fmt.Sprintf(`<h2>DNS Supreme — Cluster Peer Offline</h2>
+<p>The cluster peer at <strong>%s</strong> is unreachable.</p>
+<p>Zone replication may be affected until the peer comes back online.</p>
+<p style="color:#64748b;font-size:12px">Sent from DNS Supreme</p>`, peerAddr)
+	m.SendToAll("DNS Supreme — Cluster Peer Offline: "+peerAddr, body)
+}
+
+func (m *Mailer) SendDiskUsageAlert(usagePercent float64) {
+	if !m.notif.DiskUsage {
+		return
+	}
+	body := fmt.Sprintf(`<h2>DNS Supreme — Disk Usage Warning</h2>
+<p>Disk usage has reached <strong>%.1f%%</strong>.</p>
+<p>Consider cleaning up old query logs or expanding disk space.</p>
+<p style="color:#64748b;font-size:12px">Sent from DNS Supreme</p>`, usagePercent)
+	m.SendToAll(fmt.Sprintf("DNS Supreme — Disk Usage: %.0f%%", usagePercent), body)
+}
+
+func (m *Mailer) SendDnsError(forwarder string, err error) {
+	if !m.notif.DnsErrors {
+		return
+	}
+	body := fmt.Sprintf(`<h2>DNS Supreme — Upstream DNS Error</h2>
+<p>Forwarder <strong>%s</strong> is failing with error:</p>
+<p><code>%v</code></p>
+<p style="color:#64748b;font-size:12px">Sent from DNS Supreme</p>`, forwarder, err)
+	m.SendToAll("DNS Supreme — DNS Forwarder Error", body)
 }

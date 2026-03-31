@@ -8,13 +8,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) setupPolicyRoutes(protected *gin.RouterGroup) {
-	pol := protected.Group("/policies")
+func (s *Server) setupPolicyRoutes(viewer, admin *gin.RouterGroup) {
+	// Read-only policy routes (viewer-safe)
+	viewPol := viewer.Group("/policies")
 	{
-		pol.GET("", s.listPolicies)
-		pol.POST("", s.createPolicy)
-		pol.GET("/:ip", s.getPolicy)
-		pol.DELETE("/:ip", s.deletePolicy)
+		viewPol.GET("", s.listPolicies)
+		viewPol.GET("/:ip", s.getPolicy)
+	}
+
+	// Write policy routes (admin-only)
+	adminPol := admin.Group("/policies")
+	{
+		adminPol.POST("", s.createPolicy)
+		adminPol.DELETE("/:ip", s.deletePolicy)
 	}
 }
 

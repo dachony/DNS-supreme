@@ -17,15 +17,21 @@ type logSettings struct {
 
 var currentLogSettings = logSettings{RetentionDays: 30, AutoCleanup: true}
 
-func (s *Server) setupLogRoutes(protected *gin.RouterGroup) {
-	logs := protected.Group("/log-management")
+func (s *Server) setupLogRoutes(viewer, admin *gin.RouterGroup) {
+	// Read-only log management routes (viewer-safe)
+	viewLogs := viewer.Group("/log-management")
 	{
-		logs.GET("/settings", s.getLogSettings)
-		logs.PUT("/settings", s.setLogSettings)
-		logs.GET("/stats", s.getLogStats)
-		logs.DELETE("/older-than", s.deleteOlderThan)
-		logs.DELETE("/all", s.deleteAllLogs)
-		logs.GET("/export", s.exportLogs)
+		viewLogs.GET("/settings", s.getLogSettings)
+		viewLogs.GET("/stats", s.getLogStats)
+		viewLogs.GET("/export", s.exportLogs)
+	}
+
+	// Write log management routes (admin-only)
+	adminLogs := admin.Group("/log-management")
+	{
+		adminLogs.PUT("/settings", s.setLogSettings)
+		adminLogs.DELETE("/older-than", s.deleteOlderThan)
+		adminLogs.DELETE("/all", s.deleteAllLogs)
 	}
 }
 
