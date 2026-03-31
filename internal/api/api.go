@@ -131,7 +131,7 @@ func (s *Server) setupRoutes() {
 
 		c.JSON(code, gin.H{
 			"status":         status,
-			"version":        "1.0.0",
+			"version":        "2.0.0",
 			"uptime_seconds": int64(time.Since(startTime).Seconds()),
 			"db_ok":          dbOK,
 			"dns_ok":         true,

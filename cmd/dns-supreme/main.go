@@ -22,7 +22,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
-	slog.Info("DNS-supreme starting", "version", "1.0.0")
+	slog.Info("DNS-supreme starting", "version", "2.0.0")
 
 	cfg := config.LoadFromEnv()
 
