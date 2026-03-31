@@ -167,6 +167,7 @@ const loading = ref(false)
 const refreshInterval = ref(5)
 let refreshTimer: any = null
 let eventSource: EventSource | null = null
+let sseRetryDelay = 5000
 
 const refreshOptions = [
   { label: '1s', value: 1 },
@@ -300,8 +301,12 @@ function connectSSE() {
       eventSource.close()
       eventSource = null
     }
-    // Reconnect after 5 seconds
-    setTimeout(connectSSE, 5000)
+    sseRetryDelay = Math.min(sseRetryDelay * 2, 60000)
+    setTimeout(connectSSE, sseRetryDelay)
+  }
+
+  eventSource.onopen = () => {
+    sseRetryDelay = 5000
   }
 }
 

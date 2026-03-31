@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,30 @@ import (
 	"github.com/dachony/dns-supreme/internal/db"
 	"github.com/gin-gonic/gin"
 )
+
+func validateRecordValue(rtype, value string) error {
+	switch rtype {
+	case "A":
+		ip := net.ParseIP(value)
+		if ip == nil || ip.To4() == nil {
+			return fmt.Errorf("invalid IPv4 address: %s", value)
+		}
+	case "AAAA":
+		ip := net.ParseIP(value)
+		if ip == nil || ip.To4() != nil {
+			return fmt.Errorf("invalid IPv6 address: %s", value)
+		}
+	case "MX", "CNAME", "NS":
+		if value == "" || strings.Contains(value, " ") {
+			return fmt.Errorf("invalid hostname: %s", value)
+		}
+	case "TXT":
+		if len(value) > 255 {
+			return fmt.Errorf("TXT record too long (max 255 chars)")
+		}
+	}
+	return nil
+}
 
 func (s *Server) setupZoneRoutes(viewer, admin *gin.RouterGroup) {
 	// Read-only zone routes (viewer-safe)
@@ -181,6 +206,11 @@ func (s *Server) createRecord(c *gin.Context) {
 		req.TTL = 3600
 	}
 
+	if err := validateRecordValue(req.Type, req.Value); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	record := &db.DNSRecord{
 		ZoneID: zoneID, Name: req.Name, Type: req.Type,
 		Value: req.Value, TTL: req.TTL, Priority: req.Priority,
@@ -202,6 +232,11 @@ func (s *Server) updateRecord(c *gin.Context) {
 	}
 	if req.TTL == 0 {
 		req.TTL = 3600
+	}
+
+	if err := validateRecordValue(req.Type, req.Value); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	record := &db.DNSRecord{

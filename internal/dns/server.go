@@ -228,9 +228,14 @@ func (s *Server) resolveHostname(ip string) string {
 	s.hostnameCache[host] = hostname
 	// Limit cache size
 	if len(s.hostnameCache) > 10000 {
+		// Evict ~20% of entries
+		count := 0
 		for k := range s.hostnameCache {
 			delete(s.hostnameCache, k)
-			break
+			count++
+			if count >= 2000 {
+				break
+			}
 		}
 	}
 	s.hostnameMu.Unlock()

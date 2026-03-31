@@ -4,6 +4,7 @@ import axios from 'axios'
 const token = ref(localStorage.getItem('token') || '')
 const user = ref<any>(JSON.parse(localStorage.getItem('user') || 'null'))
 const mfaPending = ref(false)
+const forcePasswordChange = ref(false)
 
 export const isAuthenticated = computed(() => !!token.value && !!user.value)
 export const currentUser = computed(() => user.value)
@@ -39,6 +40,7 @@ export async function login(username: string, password: string): Promise<{ mfaRe
 
   user.value = data.user
   localStorage.setItem('user', JSON.stringify(data.user))
+  forcePasswordChange.value = data.force_password_change || false
   return { mfaRequired: false }
 }
 
@@ -51,10 +53,13 @@ export async function verifyMFA(code: string) {
   mfaPending.value = false
 }
 
+export { forcePasswordChange }
+
 export function logout() {
   token.value = ''
   user.value = null
   mfaPending.value = false
+  forcePasswordChange.value = false
   localStorage.removeItem('token')
   localStorage.removeItem('user')
 }

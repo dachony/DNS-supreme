@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -57,6 +58,11 @@ func (s *Server) updateServerSettings(c *gin.Context) {
 	if data, err := json.Marshal(req); err == nil {
 		s.db.SetSetting("server_settings", string(data))
 	}
+	// Audit
+	userID, _ := c.Get("userID")
+	username, _ := c.Get("username")
+	s.db.LogAudit(userID.(int), username.(string), "settings_change", "Server settings updated", c.ClientIP())
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
 		"message": "Settings saved. Some changes require a restart to take effect.",
@@ -93,6 +99,11 @@ func (s *Server) setForwarders(c *gin.Context) {
 	if data, err := json.Marshal(req.Forwarders); err == nil {
 		s.db.SetSetting("forwarders", string(data))
 	}
+	// Audit
+	userID, _ := c.Get("userID")
+	username, _ := c.Get("username")
+	s.db.LogAudit(userID.(int), username.(string), "settings_change", fmt.Sprintf("Forwarders updated: %v", req.Forwarders), c.ClientIP())
+
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 

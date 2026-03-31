@@ -79,6 +79,11 @@ func (s *Server) setBlockPageTemplate(c *gin.Context) {
 		}
 	}
 
+	// Audit
+	userID, _ := c.Get("userID")
+	username, _ := c.Get("username")
+	s.db.LogAudit(userID.(int), username.(string), "settings_change", "Block page template updated", c.ClientIP())
+
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -90,8 +95,9 @@ func (s *Server) uploadBlockPageLogo(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// Validate file type
-	ext := strings.ToLower(filepath.Ext(header.Filename))
+	// Sanitize extension to prevent path traversal
+	ext := filepath.Ext(filepath.Base(header.Filename))
+	ext = strings.ToLower(ext)
 	allowed := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".svg": true, ".gif": true, ".webp": true, ".ico": true}
 	if !allowed[ext] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file type, allowed: png, jpg, svg, gif, webp, ico"})

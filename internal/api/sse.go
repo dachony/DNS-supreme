@@ -33,20 +33,24 @@ func (h *sseHub) addClient() chan string {
 
 func (h *sseHub) removeClient(ch chan string) {
 	h.mu.Lock()
-	delete(h.clients, ch)
-	close(ch)
+	if _, ok := h.clients[ch]; ok {
+		delete(h.clients, ch)
+		close(ch)
+	}
 	h.mu.Unlock()
 }
 
 func (h *sseHub) broadcast(event, data string) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", event, data)
 	for ch := range h.clients {
 		select {
 		case ch <- msg:
 		default:
-			// Client too slow, skip
+			// Client too slow, remove it
+			delete(h.clients, ch)
+			close(ch)
 		}
 	}
 }

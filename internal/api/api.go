@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,7 +36,8 @@ type Server struct {
 	fail2ban      *Fail2Ban
 	mailer        *mailer.Mailer
 	acmeClient    *certs.ACMEClient
-	emailMFACodes  map[int]emailMFAEntry // userID -> code+expiry
+	emailMFACodesMu sync.RWMutex
+	emailMFACodes   map[int]emailMFAEntry // userID -> code+expiry
 	blocklistTimer *time.Timer
 	sseHub         *sseHub
 	router         *gin.Engine
@@ -97,7 +99,8 @@ func (s *Server) ensureDefaultAdmin() {
 		if err := s.db.CreateUser(user); err != nil {
 			slog.Error("failed to create default admin", "component", "api", "error", err)
 		} else {
-			slog.Warn("default admin user created, change password immediately", "component", "api", "username", "admin")
+			s.db.SetSetting("force_password_change", "true")
+			slog.Info("default admin user created", "component", "api", "username", "admin")
 		}
 	}
 }
@@ -296,6 +299,8 @@ type emailMFAEntry struct {
 }
 
 func (s *Server) storeEmailMFACode(userID int, code string) {
+	s.emailMFACodesMu.Lock()
+	defer s.emailMFACodesMu.Unlock()
 	s.emailMFACodes[userID] = emailMFAEntry{
 		Code:      code,
 		ExpiresAt: time.Now().Add(5 * time.Minute),
@@ -303,6 +308,8 @@ func (s *Server) storeEmailMFACode(userID int, code string) {
 }
 
 func (s *Server) verifyEmailMFACode(userID int, code string) bool {
+	s.emailMFACodesMu.Lock()
+	defer s.emailMFACodesMu.Unlock()
 	entry, ok := s.emailMFACodes[userID]
 	if !ok {
 		return false
@@ -427,9 +434,11 @@ func (s *Server) login(c *gin.Context) {
 
 	s.db.UpdateLastLogin(user.ID)
 	s.db.LogAudit(user.ID, user.Username, "login", "Successful login", clientIP)
+	forceChange := s.db.GetSetting("force_password_change") == "true" && user.Username == "admin"
 	c.JSON(http.StatusOK, gin.H{
-		"token":        token,
-		"mfa_required": false,
+		"token":                 token,
+		"mfa_required":          false,
+		"force_password_change": forceChange,
 		"user": gin.H{
 			"id":         user.ID,
 			"username":   user.Username,
@@ -561,8 +570,17 @@ func (s *Server) changePassword(c *gin.Context) {
 		return
 	}
 
+	if err := auth.ValidatePassword(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	hash, _ := auth.HashPassword(req.NewPassword)
 	s.db.UpdateUserPassword(user.ID, hash)
+	// Clear force password change flag if it was set
+	if s.db.GetSetting("force_password_change") == "true" {
+		s.db.DeleteSetting("force_password_change")
+	}
 	s.db.LogAudit(user.ID, user.Username, "password_change", "Password changed", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
@@ -672,6 +690,11 @@ func (s *Server) createUser(c *gin.Context) {
 		return
 	}
 
+	if err := auth.ValidatePassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	hash, _ := auth.HashPassword(req.Password)
 	user := &db.User{
 		Username:     req.Username,
@@ -763,6 +786,10 @@ func (s *Server) resetUserPassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := auth.ValidatePassword(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	hash, _ := auth.HashPassword(req.NewPassword)
 	s.db.UpdateUserPassword(id, hash)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -794,6 +821,9 @@ func (s *Server) forgotPassword(c *gin.Context) {
 
 	// Build reset URL
 	scheme := "http"
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
 	host := c.Request.Host
 	resetURL := fmt.Sprintf("%s://%s/reset-password?token=%s", scheme, host, token)
 
@@ -822,8 +852,8 @@ func (s *Server) resetPassword(c *gin.Context) {
 		return
 	}
 
-	if len(req.NewPassword) < 6 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "password must be at least 6 characters"})
+	if err := auth.ValidatePassword(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 

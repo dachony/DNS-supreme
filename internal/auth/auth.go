@@ -13,6 +13,28 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// ValidatePassword checks if password meets minimum requirements
+func ValidatePassword(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	var hasUpper, hasLower, hasDigit bool
+	for _, c := range password {
+		switch {
+		case 'A' <= c && c <= 'Z':
+			hasUpper = true
+		case 'a' <= c && c <= 'z':
+			hasLower = true
+		case '0' <= c && c <= '9':
+			hasDigit = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit {
+		return fmt.Errorf("password must contain uppercase, lowercase, and a digit")
+	}
+	return nil
+}
+
 func HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(hash), err

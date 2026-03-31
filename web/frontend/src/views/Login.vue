@@ -64,6 +64,7 @@ async function handleLogin() {
     }
   } catch (e: any) {
     error.value = e.response?.data?.error || 'Login failed'
+    password.value = ''
   } finally {
     loading.value = false
   }

@@ -41,6 +41,10 @@
       </div>
     </nav>
     <main class="content">
+      <div v-if="forcePasswordChange" class="force-pw-banner">
+        <span>You are using the default admin password. Please change it immediately.</span>
+        <router-link to="/users" class="force-pw-link">Change Password</router-link>
+      </div>
       <router-view />
 
       <!-- Floating toast for TLS reload -->
@@ -76,7 +80,7 @@
 import { ref, reactive, provide, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
-import { isAuthenticated, currentUser, logout } from './auth'
+import { isAuthenticated, currentUser, logout, forcePasswordChange } from './auth'
 
 const router = useRouter()
 const status = ref<any>(null)
@@ -468,4 +472,22 @@ table tbody tr:hover { background: var(--bg-hover) !important; }
 
 .login-page { background: var(--bg-body) !important; }
 .login-card { background: var(--bg-card) !important; border-color: var(--border) !important; }
+
+.force-pw-banner {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+.force-pw-link {
+  color: #ef4444;
+  font-weight: 600;
+  text-decoration: underline;
+}
 </style>
