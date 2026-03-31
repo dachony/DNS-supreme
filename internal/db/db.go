@@ -73,8 +73,16 @@ func New(dbCfg config.DatabaseConfig, logCfg config.LoggingConfig) (*Database, e
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
+	if dbCfg.MaxOpenConns > 0 {
+		db.SetMaxOpenConns(dbCfg.MaxOpenConns)
+	} else {
+		db.SetMaxOpenConns(25)
+	}
+	if dbCfg.MaxIdleConns > 0 {
+		db.SetMaxIdleConns(dbCfg.MaxIdleConns)
+	} else {
+		db.SetMaxIdleConns(5)
+	}
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	// Wait for DB to be ready
@@ -411,6 +419,10 @@ func (d *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
 
 func (d *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	return d.db.Query(query, args...)
+}
+
+func (d *Database) Ping() error {
+	return d.db.Ping()
 }
 
 func (d *Database) Close() {

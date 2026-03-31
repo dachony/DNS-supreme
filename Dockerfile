@@ -17,12 +17,15 @@ RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -o /dns-supreme ./cmd/dns-s
 
 # Stage 3: Final image
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata curl
 WORKDIR /app
 COPY --from=backend-builder /dns-supreme /app/dns-supreme
 COPY --from=frontend-builder /app/web/frontend/dist /app/web/dist
 COPY configs/default.json /app/configs/default.json
 
 EXPOSE 53/udp 53/tcp 80 443 853/tcp 853/udp 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:5380/api/health || exit 1
 
 ENTRYPOINT ["/app/dns-supreme"]

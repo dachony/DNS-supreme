@@ -109,9 +109,24 @@ func (s *Server) setupRoutes() {
 
 	// Health check and restart (no auth on health)
 	api.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "healthy",
-			"version": "1.0.0",
+		dbOK := true
+		if err := s.db.Ping(); err != nil {
+			dbOK = false
+		}
+
+		status := "healthy"
+		code := http.StatusOK
+		if !dbOK {
+			status = "degraded"
+			code = http.StatusServiceUnavailable
+		}
+
+		c.JSON(code, gin.H{
+			"status":         status,
+			"version":        "1.0.0",
+			"uptime_seconds": int64(time.Since(startTime).Seconds()),
+			"db_ok":          dbOK,
+			"dns_ok":         true,
 		})
 	})
 

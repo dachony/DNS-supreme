@@ -186,10 +186,25 @@ func main() {
 			log.Println("[Restart] Restart complete")
 			continue
 		}
-		break // SIGINT or SIGTERM
+		log.Println("Shutting down gracefully (10s timeout)...")
+		break
 	}
 
-	log.Println("Shutting down...")
+	// Give in-flight requests time to complete
+	done := make(chan struct{})
+	go func() {
+		dnsServer.Shutdown()
+		netProtect.Stop()
+		database.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("Shutdown complete")
+	case <-time.After(10 * time.Second):
+		log.Println("Shutdown timed out, forcing exit")
+	}
 }
 
 func loadDefaultBlocklists(engine *filter.Engine) {

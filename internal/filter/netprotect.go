@@ -13,13 +13,15 @@ import (
 
 // NetProtectCategory represents a network protection threat category
 type NetProtectCategory struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Enabled     bool     `json:"enabled"`
-	Sources     []string `json:"sources"`
-	EntryCount  int      `json:"entry_count"`
-	LastUpdated string   `json:"last_updated,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Enabled        bool     `json:"enabled"`
+	Sources        []string `json:"sources"`
+	EntryCount     int      `json:"entry_count"`
+	LastUpdated    string   `json:"last_updated,omitempty"`
+	LastFetchError string   `json:"last_fetch_error,omitempty"`
+	Stale          bool     `json:"stale"`
 }
 
 // NetProtectEngine checks destination IPs against threat intelligence feeds and GeoIP
@@ -33,9 +35,11 @@ type NetProtectEngine struct {
 }
 
 type npCategory struct {
-	meta    NetProtectCategory
-	ips     map[string]bool   // individual IPs
-	cidrs   []*net.IPNet      // CIDR ranges
+	meta          NetProtectCategory
+	ips           map[string]bool
+	cidrs         []*net.IPNet
+	lastFetchErr  string
+	lastFetchTime time.Time
 }
 
 func (c *npCategory) contains(ip net.IP) bool {
@@ -314,10 +318,12 @@ func (e *NetProtectEngine) loadCategory(id string) {
 	newIPs := make(map[string]bool)
 	var newCIDRs []*net.IPNet
 
+	var lastErr string
 	for _, src := range sources {
 		ips, cidrs, err := fetchIPList(src)
 		if err != nil {
 			log.Printf("[NetProtect] Failed to fetch %s from %s: %v", id, src, err)
+			lastErr = fmt.Sprintf("fetch %s: %v", src, err)
 			continue
 		}
 		for ip := range ips {
@@ -332,7 +338,18 @@ func (e *NetProtectEngine) loadCategory(id string) {
 	cat.ips = newIPs
 	cat.cidrs = newCIDRs
 	cat.meta.EntryCount = total
-	cat.meta.LastUpdated = time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	cat.meta.LastUpdated = now.Format(time.RFC3339)
+	cat.lastFetchTime = now
+	if lastErr != "" && total == 0 {
+		cat.lastFetchErr = lastErr
+		cat.meta.LastFetchError = lastErr
+		cat.meta.Stale = true
+	} else {
+		cat.lastFetchErr = ""
+		cat.meta.LastFetchError = ""
+		cat.meta.Stale = false
+	}
 	e.mu.Unlock()
 
 	log.Printf("[NetProtect] Loaded %s: %d IPs + %d CIDRs", id, len(newIPs), len(newCIDRs))

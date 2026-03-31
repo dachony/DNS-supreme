@@ -622,7 +622,7 @@ func (s *Server) processDNSMsg(r *dns.Msg, clientAddr string, protocol string) *
 	}
 
 	if resp.Rcode == dns.RcodeSuccess {
-		if ttl := extractMinTTL(resp); ttl > 0 {
+		if ttl := s.extractMinTTL(resp); ttl > 0 {
 			s.cache.Set(cacheKey, resp, ttl)
 		}
 	}
@@ -716,15 +716,23 @@ func extractIP(rr dns.RR) string {
 	}
 }
 
-func extractMinTTL(msg *dns.Msg) time.Duration {
+func (s *Server) extractMinTTL(msg *dns.Msg) time.Duration {
 	minTTL := uint32(300)
 	for _, rr := range msg.Answer {
 		if ttl := rr.Header().Ttl; ttl < minTTL {
 			minTTL = ttl
 		}
 	}
-	if minTTL < 10 {
-		minTTL = 10
+	floor := uint32(s.cfg.CacheMinTTL)
+	if floor == 0 {
+		floor = 10
+	}
+	if minTTL < floor {
+		minTTL = floor
+	}
+	ceiling := uint32(s.cfg.CacheMaxTTL)
+	if ceiling > 0 && minTTL > ceiling {
+		minTTL = ceiling
 	}
 	return time.Duration(minTTL) * time.Second
 }

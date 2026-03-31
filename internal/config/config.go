@@ -16,19 +16,23 @@ type Config struct {
 }
 
 type DNSConfig struct {
-	ListenAddr string   `json:"listen_addr"`
-	Port       int      `json:"port"`
-	Forwarders []string `json:"forwarders"`
-	CacheSize  int      `json:"cache_size"`
+	ListenAddr  string   `json:"listen_addr"`
+	Port        int      `json:"port"`
+	Forwarders  []string `json:"forwarders"`
+	CacheSize   int      `json:"cache_size"`
+	CacheMinTTL int      `json:"cache_min_ttl"`
+	CacheMaxTTL int      `json:"cache_max_ttl"`
 }
 
 type DatabaseConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	DBName   string `json:"dbname"`
-	SSLMode  string `json:"sslmode"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	User         string `json:"user"`
+	Password     string `json:"password"`
+	DBName       string `json:"dbname"`
+	SSLMode      string `json:"sslmode"`
+	MaxOpenConns int    `json:"max_open_conns"`
+	MaxIdleConns int    `json:"max_idle_conns"`
 }
 
 type APIConfig struct {
@@ -58,18 +62,22 @@ func (d DatabaseConfig) DSN() string {
 func DefaultConfig() *Config {
 	return &Config{
 		DNS: DNSConfig{
-			ListenAddr: "0.0.0.0",
-			Port:       53,
-			Forwarders: []string{"8.8.8.8:53", "1.1.1.1:53"},
-			CacheSize:  10000,
+			ListenAddr:  "0.0.0.0",
+			Port:        53,
+			Forwarders:  []string{"8.8.8.8:53", "1.1.1.1:53"},
+			CacheSize:   10000,
+			CacheMinTTL: 10,
+			CacheMaxTTL: 86400,
 		},
 		Database: DatabaseConfig{
-			Host:     "localhost",
-			Port:     5432,
-			User:     "dnsupreme",
-			Password: "dnsupreme",
-			DBName:   "dnsupreme",
-			SSLMode:  "disable",
+			Host:         "localhost",
+			Port:         5432,
+			User:         "dnsupreme",
+			Password:     "dnsupreme",
+			DBName:       "dnsupreme",
+			SSLMode:      "disable",
+			MaxOpenConns: 25,
+			MaxIdleConns: 5,
 		},
 		API: APIConfig{
 			ListenAddr: "0.0.0.0",
@@ -134,6 +142,26 @@ func LoadFromEnv() *Config {
 	}
 	if v := os.Getenv("DB_NAME"); v != "" {
 		cfg.Database.DBName = v
+	}
+	if v := os.Getenv("DNS_CACHE_MIN_TTL"); v != "" {
+		if p, err := parsePort(v); err == nil {
+			cfg.DNS.CacheMinTTL = p
+		}
+	}
+	if v := os.Getenv("DNS_CACHE_MAX_TTL"); v != "" {
+		if p, err := parsePort(v); err == nil {
+			cfg.DNS.CacheMaxTTL = p
+		}
+	}
+	if v := os.Getenv("DB_MAX_OPEN_CONNS"); v != "" {
+		if p, err := parsePort(v); err == nil {
+			cfg.Database.MaxOpenConns = p
+		}
+	}
+	if v := os.Getenv("DB_MAX_IDLE_CONNS"); v != "" {
+		if p, err := parsePort(v); err == nil {
+			cfg.Database.MaxIdleConns = p
+		}
 	}
 	if v := os.Getenv("API_PORT"); v != "" {
 		if p, err := parsePort(v); err == nil {
