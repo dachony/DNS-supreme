@@ -74,6 +74,7 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 	s.LoadBlockPageTemplate()
 	s.loadACMEConfig()
 	s.getClusterFromDB()
+	dnsServer.SetDNSSEC(s.dnssec)
 	s.setupRoutes()
 	return s
 }
@@ -113,6 +114,9 @@ func (s *Server) setupRoutes() {
 			"version": "1.0.0",
 		})
 	})
+
+	// Prometheus metrics (no auth, for monitoring scrapers)
+	api.GET("/metrics", s.prometheusMetrics)
 
 	// Public auth endpoints
 	api.POST("/auth/login", s.login)
@@ -231,6 +235,7 @@ func (s *Server) setupRoutes() {
 		admin := protected.Group("")
 		admin.Use(auth.AdminOnly())
 		{
+			admin.GET("/audit-logs", s.getAuditLogs)
 			admin.GET("/users", s.listUsers)
 			admin.POST("/users", s.createUser)
 			admin.PUT("/users/:id", s.updateUser)
@@ -375,6 +380,7 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	s.db.UpdateLastLogin(user.ID)
+	s.db.LogAudit(user.ID, user.Username, "login", "Successful login", clientIP)
 	c.JSON(http.StatusOK, gin.H{
 		"token":        token,
 		"mfa_required": false,
@@ -494,6 +500,7 @@ func (s *Server) changePassword(c *gin.Context) {
 
 	hash, _ := auth.HashPassword(req.NewPassword)
 	s.db.UpdateUserPassword(user.ID, hash)
+	s.db.LogAudit(user.ID, user.Username, "password_change", "Password changed", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -606,6 +613,9 @@ func (s *Server) createUser(c *gin.Context) {
 		return
 	}
 
+	adminID, _ := c.Get("userID")
+	adminName, _ := c.Get("username")
+	s.db.LogAudit(adminID.(int), adminName.(string), "user_create", "Created user: "+req.Username, c.ClientIP())
 	c.JSON(http.StatusCreated, user)
 }
 
@@ -654,10 +664,17 @@ func (s *Server) deleteUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete yourself"})
 		return
 	}
+	deletedUser, _ := s.db.GetUserByID(id)
 	if err := s.db.DeleteUser(id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+	adminName, _ := c.Get("username")
+	deletedName := fmt.Sprintf("user_id=%d", id)
+	if deletedUser != nil {
+		deletedName = deletedUser.Username
+	}
+	s.db.LogAudit(currentUserID.(int), adminName.(string), "user_delete", "Deleted user: "+deletedName, c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -675,6 +692,23 @@ func (s *Server) resetUserPassword(c *gin.Context) {
 	hash, _ := auth.HashPassword(req.NewPassword)
 	s.db.UpdateUserPassword(id, hash)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) getAuditLogs(c *gin.Context) {
+	limit := 50
+	offset := 0
+	if l, err := strconv.Atoi(c.DefaultQuery("limit", "50")); err == nil && l > 0 && l <= 500 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(c.DefaultQuery("offset", "0")); err == nil && o >= 0 {
+		offset = o
+	}
+	entries, total, err := s.db.GetAuditLogs(limit, offset)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"entries": entries, "total": total})
 }
 
 // --- Existing Handlers ---
@@ -756,6 +790,10 @@ func (s *Server) addBlocklist(c *gin.Context) {
 			break
 		}
 	}
+	if uid, ok := c.Get("userID"); ok {
+		uname, _ := c.Get("username")
+		s.db.LogAudit(uid.(int), uname.(string), "blocklist_add", "Added blocklist: "+req.Name, c.ClientIP())
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -829,6 +867,10 @@ func (s *Server) removeBlocklist(c *gin.Context) {
 	name := c.Param("name")
 	s.filter.RemoveList(name)
 	s.db.RemoveBlocklist(name)
+	if uid, ok := c.Get("userID"); ok {
+		uname, _ := c.Get("username")
+		s.db.LogAudit(uid.(int), uname.(string), "blocklist_remove", "Removed blocklist: "+name, c.ClientIP())
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 

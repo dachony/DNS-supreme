@@ -54,6 +54,7 @@ type Server struct {
 	onBlock          func(domain, reason string)
 	responseFilterFn ResponseFilterFunc
 	axfrAllowIPs     []net.IPNet
+	dnssecMgr        *DNSSECManager
 	hostnameCache    map[string]string // IP -> hostname cache
 	hostnameMu       sync.RWMutex
 	rateLimiter      map[string]*rateBucket
@@ -150,10 +151,20 @@ func (s *Server) isAXFRAllowed(addr string) bool {
 	return false
 }
 
+func (s *Server) SetDNSSEC(dm *DNSSECManager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dnssecMgr = dm
+}
+
 func (s *Server) SetResponseFilter(fn ResponseFilterFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.responseFilterFn = fn
+}
+
+func (s *Server) CacheSize() int {
+	return s.cache.Size()
 }
 
 func (s *Server) FlushCache() {
@@ -522,6 +533,13 @@ func (s *Server) processDNSMsg(r *dns.Msg, clientAddr string, protocol string) *
 	if zoneResp := s.resolveFromZones(domain, qtype); zoneResp != nil {
 		zoneResp.SetReply(r)
 		zoneResp.Authoritative = true
+		// Sign authoritative responses with DNSSEC if available
+		s.mu.RLock()
+		dm := s.dnssecMgr
+		s.mu.RUnlock()
+		if dm != nil {
+			zoneResp = dm.SignResponse(zoneResp)
+		}
 		result.Latency = time.Since(start)
 		result.Upstream = "zone"
 		if s.logFn != nil {

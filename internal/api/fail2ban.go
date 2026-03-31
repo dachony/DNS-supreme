@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -244,6 +245,11 @@ func (s *Server) setFail2BanSettings(c *gin.Context) {
 	s.fail2ban.SetSettings(req.Enabled, req.MaxRetries, req.BanSeconds)
 	if data, err := json.Marshal(s.fail2ban.GetSettings()); err == nil {
 		s.db.SetSetting("fail2ban_settings", string(data))
+	}
+	if uid, ok := c.Get("userID"); ok {
+		uname, _ := c.Get("username")
+		detail := fmt.Sprintf("Fail2ban settings: enabled=%v, max_retries=%d, ban_seconds=%d", req.Enabled, req.MaxRetries, req.BanSeconds)
+		s.db.LogAudit(uid.(int), uname.(string), "settings_fail2ban", detail, c.ClientIP())
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

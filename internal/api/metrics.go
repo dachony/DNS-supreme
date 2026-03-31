@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,6 +15,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type certAlert struct {
+	Subject   string `json:"subject"`
+	ExpiresAt string `json:"expires_at"`
+	DaysLeft  int    `json:"days_left"`
+	Warning   bool   `json:"warning"`
+}
+
 type systemMetrics struct {
 	CPU        cpuMetrics  `json:"cpu"`
 	Memory     memMetrics  `json:"memory"`
@@ -20,6 +29,7 @@ type systemMetrics struct {
 	Database   dbMetrics   `json:"database"`
 	Uptime     int64       `json:"uptime_seconds"`
 	GoRoutines int         `json:"goroutines"`
+	Certs      []certAlert `json:"certs"`
 }
 
 type cpuMetrics struct {
@@ -72,6 +82,7 @@ func (s *Server) getSystemMetrics(c *gin.Context) {
 	metrics.Disk.AppSizeBytes = getDirSize("/app")
 
 	metrics.Database = s.getDBMetrics()
+	metrics.Certs = s.getCertAlerts()
 
 	c.JSON(http.StatusOK, metrics)
 }
@@ -181,4 +192,29 @@ func humanBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+func (s *Server) getCertAlerts() []certAlert {
+	var alerts []certAlert
+	certPath := "/app/certs/server.crt"
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return alerts
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return alerts
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return alerts
+	}
+	daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
+	alerts = append(alerts, certAlert{
+		Subject:   cert.Subject.CommonName,
+		ExpiresAt: cert.NotAfter.Format(time.RFC3339),
+		DaysLeft:  daysLeft,
+		Warning:   daysLeft < 30,
+	})
+	return alerts
 }

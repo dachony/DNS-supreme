@@ -102,9 +102,36 @@ func New(dbCfg config.DatabaseConfig, logCfg config.LoggingConfig) (*Database, e
 	}
 
 	go d.flushLoop()
+	d.startRetentionCleanup()
 
 	log.Printf("[DB] Connected to PostgreSQL")
 	return d, nil
+}
+
+func (d *Database) startRetentionCleanup() {
+	// Run immediately on startup, then every hour
+	d.cleanOldLogs()
+	ticker := time.NewTicker(1 * time.Hour)
+	go func() {
+		for range ticker.C {
+			d.cleanOldLogs()
+		}
+	}()
+}
+
+func (d *Database) cleanOldLogs() {
+	if d.cfg.RetentionDays <= 0 {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -d.cfg.RetentionDays)
+	result, err := d.db.Exec("DELETE FROM query_log WHERE timestamp < $1", cutoff)
+	if err != nil {
+		log.Printf("[DB] Retention cleanup error: %v", err)
+		return
+	}
+	if rows, _ := result.RowsAffected(); rows > 0 {
+		log.Printf("[DB] Retention cleanup: deleted %d logs older than %d days", rows, d.cfg.RetentionDays)
+	}
 }
 
 func (d *Database) migrate() error {
@@ -159,6 +186,17 @@ func (d *Database) migrate() error {
 		value TEXT NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
+
+	CREATE TABLE IF NOT EXISTS audit_log (
+		id BIGSERIAL PRIMARY KEY,
+		timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		user_id INTEGER,
+		username VARCHAR(50),
+		action VARCHAR(50) NOT NULL,
+		detail TEXT,
+		client_ip VARCHAR(45)
+	);
+	CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log (timestamp DESC);
 	`
 	_, err := d.db.Exec(schema)
 	if err != nil {
