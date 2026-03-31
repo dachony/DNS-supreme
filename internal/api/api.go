@@ -43,7 +43,12 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(cors.Default())
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:    []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: false,
+	}))
 
 	s := &Server{
 		cfg:        cfg,
@@ -61,6 +66,7 @@ func NewServer(cfg config.APIConfig, database *db.Database, filterEngine *filter
 		router:     router,
 	}
 
+	auth.InitSecret(database.GetSetting, database.SetSetting)
 	s.ensureDefaultAdmin()
 	s.LoadMailConfig()
 	s.LoadFail2BanConfig()
@@ -388,6 +394,12 @@ type mfaVerifyReq struct {
 }
 
 func (s *Server) mfaVerify(c *gin.Context) {
+	clientIP := c.ClientIP()
+	if s.fail2ban.IsBanned(clientIP) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many failed attempts. Your IP is temporarily blocked."})
+		return
+	}
+
 	header := c.GetHeader("Authorization")
 	if header == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "token required"})
@@ -424,6 +436,7 @@ func (s *Server) mfaVerify(c *gin.Context) {
 		verified = auth.VerifyTOTP(user.MFASecret, req.Code)
 	}
 	if !verified {
+		s.fail2ban.RecordFail(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid MFA code"})
 		return
 	}

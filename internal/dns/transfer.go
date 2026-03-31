@@ -26,6 +26,14 @@ func (s *Server) handleAXFR(w mdns.ResponseWriter, r *mdns.Msg) {
 	}
 
 	q := r.Question[0]
+
+	clientAddr := w.RemoteAddr().String()
+	if !s.isAXFRAllowed(clientAddr) {
+		log.Printf("[AXFR] Transfer denied for %s (not in allowed IPs)", clientAddr)
+		mdns.HandleFailed(w, r)
+		return
+	}
+
 	zoneName := strings.TrimSuffix(q.Name, ".")
 
 	s.mu.RLock()

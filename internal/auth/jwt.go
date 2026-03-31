@@ -10,22 +10,30 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-var (
-	jwtSecret     []byte
-	jwtSecretOnce sync.Once
-)
+var jwtSecret []byte
+
+// InitSecret loads or generates the JWT secret, persisting it in the database.
+func InitSecret(getSetting func(string) string, setSetting func(string, string) error) {
+	if s := getSetting("jwt_secret"); s != "" {
+		jwtSecret, _ = hex.DecodeString(s)
+		return
+	}
+	jwtSecret = make([]byte, 32)
+	rand.Read(jwtSecret)
+	setSetting("jwt_secret", hex.EncodeToString(jwtSecret))
+}
 
 func getSecret() []byte {
-	jwtSecretOnce.Do(func() {
+	if jwtSecret == nil {
+		// Fallback: generate ephemeral secret if InitSecret was not called.
 		jwtSecret = make([]byte, 32)
 		rand.Read(jwtSecret)
-	})
+	}
 	return jwtSecret
 }
 

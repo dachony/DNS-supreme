@@ -53,9 +53,101 @@ type Server struct {
 	blockPageIP      net.IP
 	onBlock          func(domain, reason string)
 	responseFilterFn ResponseFilterFunc
+	axfrAllowIPs     []net.IPNet
 	hostnameCache    map[string]string // IP -> hostname cache
 	hostnameMu       sync.RWMutex
+	rateLimiter      map[string]*rateBucket
+	rateLimiterMu    sync.Mutex
 	mu               sync.RWMutex
+}
+
+type rateBucket struct {
+	tokens    int
+	lastReset time.Time
+}
+
+const (
+	rateLimit  = 100 // queries per window
+	rateWindow = 10 * time.Second
+)
+
+func (s *Server) checkRateLimit(clientIP string) bool {
+	host, _, _ := net.SplitHostPort(clientIP)
+	if host == "" {
+		host = clientIP
+	}
+
+	s.rateLimiterMu.Lock()
+	defer s.rateLimiterMu.Unlock()
+
+	if s.rateLimiter == nil {
+		s.rateLimiter = make(map[string]*rateBucket)
+	}
+
+	bucket, ok := s.rateLimiter[host]
+	if !ok || time.Since(bucket.lastReset) > rateWindow {
+		s.rateLimiter[host] = &rateBucket{tokens: 1, lastReset: time.Now()}
+		return true
+	}
+
+	bucket.tokens++
+	if bucket.tokens > rateLimit {
+		return false
+	}
+	return true
+}
+
+func (s *Server) startRateLimitCleanup() {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		for range ticker.C {
+			s.rateLimiterMu.Lock()
+			for ip, bucket := range s.rateLimiter {
+				if time.Since(bucket.lastReset) > rateWindow*2 {
+					delete(s.rateLimiter, ip)
+				}
+			}
+			s.rateLimiterMu.Unlock()
+		}
+	}()
+}
+
+func (s *Server) SetAXFRAllowIPs(cidrs []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var nets []net.IPNet
+	for _, cidr := range cidrs {
+		if !strings.Contains(cidr, "/") {
+			cidr += "/32"
+		}
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err == nil {
+			nets = append(nets, *ipnet)
+		}
+	}
+	s.axfrAllowIPs = nets
+}
+
+func (s *Server) isAXFRAllowed(addr string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.axfrAllowIPs) == 0 {
+		return true // no restriction if not configured
+	}
+	host, _, _ := net.SplitHostPort(addr)
+	if host == "" {
+		host = addr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, n := range s.axfrAllowIPs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) SetResponseFilter(fn ResponseFilterFunc) {
@@ -82,7 +174,7 @@ func (s *Server) SetBlockPage(ip string, onBlock func(domain, reason string)) {
 }
 
 func NewServer(cfg config.DNSConfig, filterFn FilterFunc, logFn LogFunc, tlsCfg *tls.Config) *Server {
-	return &Server{
+	s := &Server{
 		cfg:           cfg,
 		cache:         NewCache(cfg.CacheSize),
 		filterFn:      filterFn,
@@ -90,7 +182,10 @@ func NewServer(cfg config.DNSConfig, filterFn FilterFunc, logFn LogFunc, tlsCfg 
 		forwarders:    cfg.Forwarders,
 		tlsConfig:     tlsCfg,
 		hostnameCache: make(map[string]string),
+		rateLimiter:   make(map[string]*rateBucket),
 	}
+	s.startRateLimitCleanup()
+	return s
 }
 
 func (s *Server) resolveHostname(ip string) string {
@@ -107,8 +202,12 @@ func (s *Server) resolveHostname(ip string) string {
 		return cached
 	}
 
-	// Async reverse lookup with timeout
-	names, err := net.LookupAddr(host)
+	// Reverse lookup with timeout to avoid blocking the query path
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	resolver := net.DefaultResolver
+	names, err := resolver.LookupAddr(ctx, host)
 	hostname := ""
 	if err == nil && len(names) > 0 {
 		hostname = strings.TrimSuffix(names[0], ".")
@@ -361,6 +460,12 @@ func (s *Server) processDNSMsg(r *dns.Msg, clientAddr string, protocol string) *
 		return nil
 	}
 
+	if !s.checkRateLimit(clientAddr) {
+		msg := new(dns.Msg)
+		msg.SetRcode(r, dns.RcodeRefused)
+		return msg
+	}
+
 	q := r.Question[0]
 	domain := q.Name
 	qtype := q.Qtype
@@ -536,15 +641,49 @@ func (s *Server) forward(r *dns.Msg) (*dns.Msg, string, error) {
 	forwarders := s.forwarders
 	s.mu.RUnlock()
 
-	c := new(dns.Client)
-	c.Timeout = 5 * time.Second
+	if len(forwarders) == 0 {
+		return nil, "", fmt.Errorf("no forwarders configured")
+	}
+
+	// Single forwarder — no need for goroutines
+	if len(forwarders) == 1 {
+		c := new(dns.Client)
+		c.Timeout = 5 * time.Second
+		resp, _, err := c.Exchange(r, forwarders[0])
+		if err == nil && resp != nil {
+			return resp, forwarders[0], nil
+		}
+		return nil, "", fmt.Errorf("forwarder %s failed: %w", forwarders[0], err)
+	}
+
+	type result struct {
+		resp *dns.Msg
+		fw   string
+		err  error
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch := make(chan result, len(forwarders))
 
 	for _, fw := range forwarders {
-		resp, _, err := c.Exchange(r, fw)
-		if err == nil && resp != nil {
-			return resp, fw, nil
+		go func(fw string) {
+			c := new(dns.Client)
+			c.Timeout = 5 * time.Second
+			resp, _, err := c.ExchangeContext(ctx, r.Copy(), fw)
+			ch <- result{resp, fw, err}
+		}(fw)
+	}
+
+	for range forwarders {
+		res := <-ch
+		if res.err == nil && res.resp != nil {
+			cancel() // cancel remaining
+			return res.resp, res.fw, nil
 		}
 	}
+
 	return nil, "", fmt.Errorf("all forwarders failed")
 }
 
