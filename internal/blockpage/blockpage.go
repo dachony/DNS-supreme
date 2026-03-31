@@ -106,6 +106,12 @@ func (s *Server) RecordBlock(domain, reason string) {
 	s.mu.Unlock()
 }
 
+func (s *Server) ReloadTLS(tlsCfg *tls.Config) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tlsConfig = tlsCfg
+}
+
 func (s *Server) SetDoHHandler(handler http.Handler) {
 	s.dohHandler = handler
 }
@@ -130,10 +136,23 @@ func (s *Server) Start() error {
 	// HTTPS on port 443 (if TLS configured)
 	if s.tlsConfig != nil && s.httpsPort > 0 {
 		httpsAddr := fmt.Sprintf("%s:%d", s.listenAddr, s.httpsPort)
+		// Use GetCertificate callback so cert reloads take effect without restart
+		dynamicTLS := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				s.mu.RLock()
+				cfg := s.tlsConfig
+				s.mu.RUnlock()
+				if cfg == nil || len(cfg.Certificates) == 0 {
+					return nil, fmt.Errorf("no certificate configured")
+				}
+				return &cfg.Certificates[0], nil
+			},
+		}
 		httpsServer := &http.Server{
 			Addr:      httpsAddr,
 			Handler:   mux,
-			TLSConfig: s.tlsConfig.Clone(),
+			TLSConfig: dynamicTLS,
 		}
 		go func() {
 			slog.Info("HTTPS server starting", "component", "blockpage", "addr", httpsAddr)

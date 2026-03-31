@@ -192,10 +192,19 @@ func main() {
 		if s == syscall.SIGHUP {
 			slog.Info("SIGHUP received, reloading TLS and restarting DNS", "component", "restart")
 			// Reload TLS certificates
-			newTLS, err := certs.LoadOrGenerateTLS(certFile, keyFile)
+			// Check if user generated a cert in /app/certs/
+			reloadCert, reloadKey := certFile, keyFile
+			if reloadCert == "" {
+				if _, err := os.Stat("/app/certs/server.crt"); err == nil {
+					reloadCert = "/app/certs/server.crt"
+					reloadKey = "/app/certs/server.key"
+				}
+			}
+			newTLS, err := certs.LoadOrGenerateTLS(reloadCert, reloadKey)
 			if err == nil && newTLS != nil {
 				dnsServer.ReloadTLS(newTLS)
-				slog.Info("TLS certificates reloaded", "component", "restart")
+				blockPageServer.ReloadTLS(newTLS)
+				slog.Info("TLS certificates reloaded", "component", "restart", "cert", reloadCert)
 			}
 			slog.Info("restart complete", "component", "restart")
 			continue
