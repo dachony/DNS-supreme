@@ -15,11 +15,12 @@ import (
 
 // Block page visual settings stored as JSON
 type blockPageSettings struct {
-	Logo    string `json:"logo"`
-	Heading string `json:"heading"`
-	Message string `json:"message"`
-	Footer  string `json:"footer"`
-	Color   string `json:"color"`
+	Logo        string `json:"logo"`
+	Heading     string `json:"heading"`
+	Message     string `json:"message"`
+	Description string `json:"description"`
+	Footer      string `json:"footer"`
+	Color       string `json:"color"`
 }
 
 type blockPageReq struct {

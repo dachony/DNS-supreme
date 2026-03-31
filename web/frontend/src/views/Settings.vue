@@ -724,11 +724,14 @@
       <div class="subsection" style="margin-bottom:20px">
         <h4>Block Page Domain</h4>
         <p class="section-desc">Set a domain name that resolves to your block page. Blocked sites will show this domain in the browser address bar instead of a raw IP.</p>
-        <div style="display:flex;gap:8px;align-items:center;max-width:500px">
-          <input v-model="bpDomain" placeholder="block.mynetwork.com" style="flex:1" />
-          <button @click="saveBlockPageDomain" class="btn-primary">Save</button>
+        <div class="settings-grid" style="margin-bottom:8px">
+          <div class="field">
+            <label>Domain Name</label>
+            <input v-model="bpDomain" placeholder="block.mynetwork.com" />
+          </div>
         </div>
-        <p v-if="bpDomainMsg" class="msg-success" style="margin-top:6px">{{ bpDomainMsg }}</p>
+        <button @click="saveBlockPageDomain" class="btn-primary">Save</button>
+        <p v-if="bpDomainMsg" class="msg-success" style="margin-top:8px">{{ bpDomainMsg }}</p>
         <p class="section-desc" style="font-size:0.72rem;margin-top:6px" v-if="bpDomain">
           DNS Supreme will automatically resolve <code style="color:var(--accent)">{{ bpDomain }}</code> to your server's block page IP. No zone configuration needed.
         </p>
@@ -767,6 +770,10 @@
             <div class="field">
               <label>Message</label>
               <textarea v-model="bpMessage" rows="3" placeholder="Access to this page has been blocked by your network administrator." @input="updateBpFromVisual"></textarea>
+            </div>
+            <div class="field">
+              <label>Description (optional)</label>
+              <textarea v-model="bpDescription" rows="2" placeholder="Additional info, e.g. contact admin at support@company.com for help" @input="updateBpFromVisual"></textarea>
             </div>
             <div class="field">
               <label>Footer (optional)</label>
@@ -1649,6 +1656,7 @@ const bpLogo = ref('')
 const bpHeading = ref('Access Blocked')
 const bpMessage = ref('Access to this page has been blocked by your network administrator.')
 const bpFooter = ref('Protected by DNS Supreme')
+const bpDescription = ref('')
 const bpColor = ref('#ef4444')
 const logoUploading = ref(false)
 
@@ -1672,6 +1680,7 @@ h1{font-size:1.5rem;color:#f1f5f9;margin-bottom:12px}
 .message{color:#94a3b8;font-size:0.95rem;line-height:1.6;margin-bottom:20px}
 .domain{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 16px;font-family:monospace;font-size:0.9rem;color:${bpColor.value};margin-bottom:8px;word-break:break-all}
 .reason{color:#64748b;font-size:0.8rem;margin-bottom:20px}
+.description{color:#94a3b8;font-size:0.85rem;line-height:1.5;margin-bottom:20px;padding:12px;background:#0f172a;border-radius:8px}
 .footer{color:#475569;font-size:0.75rem;padding-top:16px;border-top:1px solid #334155}
 </style></head><body>
 <div class="card">
@@ -1681,6 +1690,7 @@ h1{font-size:1.5rem;color:#f1f5f9;margin-bottom:12px}
   <p class="message">${bpMessage.value || ''}</p>
   <div class="domain">{{.Domain}}</div>
   <p class="reason">Reason: {{.Reason}}</p>
+  ${bpDescription.value ? `<div class="description">${bpDescription.value}</div>` : ''}
   ${bpFooter.value ? `<div class="footer">${bpFooter.value}</div>` : ''}
 </div>
 </body></html>`
@@ -1725,6 +1735,7 @@ function resetBlockPage() {
   bpLogo.value = ''
   bpHeading.value = 'Access Blocked'
   bpMessage.value = 'Access to this page has been blocked by your network administrator.'
+  bpDescription.value = ''
   bpFooter.value = 'Protected by DNS Supreme'
   bpColor.value = '#ef4444'
   blockPageHTML.value = ''
@@ -1763,6 +1774,7 @@ async function loadAll() {
     if (s.heading) bpHeading.value = s.heading
     if (s.message) bpMessage.value = s.message
     if (s.footer) bpFooter.value = s.footer
+    if (s.description) bpDescription.value = s.description
     if (s.color) bpColor.value = s.color
   }
   hostname.value = hn.data.hostname || 'ns1.dnssupreme.local'
@@ -2019,6 +2031,7 @@ async function saveBlockPage() {
       heading: bpHeading.value,
       message: bpMessage.value,
       footer: bpFooter.value,
+      description: bpDescription.value,
       color: bpColor.value,
     }
   })
@@ -2178,7 +2191,7 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
   border: 1px solid var(--border); margin-bottom: 20px;
 }
 .section h3 { color: var(--text-primary); font-size: 1.05rem; margin-bottom: 4px; }
-.section-desc { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5; }
+.section-desc { color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px; line-height: 1.5; }
 .section-desc code { color: #f59e0b; background: var(--bg-input); padding: 2px 6px; border-radius: 3px; font-size: 0.8rem; }
 
 /* Shared components */
@@ -2472,16 +2485,17 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
 
 /* Server settings */
 .subsection { margin-bottom: 20px; }
-.subsection h4 { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 8px; }
-.settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-.field { display: flex; flex-direction: column; gap: 4px; }
-.field label { color: var(--text-muted); font-size: 0.8rem; }
-.field input, .field select {
-  padding: 9px 12px; background: var(--bg-input); border: 1px solid var(--border);
-  border-radius: 8px; color: var(--text-primary); font-size: 0.9rem; transition: border-color 0.15s;
+.subsection h4 { color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 10px; }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { color: var(--text-muted); font-size: 0.85rem; font-weight: 500; }
+.field input, .field select, .field textarea {
+  padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text-primary); font-size: 0.92rem; transition: border-color 0.15s;
 }
-.field input::placeholder { color: var(--text-dim); }
-.checkbox-label { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 0.85rem; cursor: pointer; padding-top: 8px; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); outline: none; }
+.field input::placeholder, .field textarea::placeholder { color: var(--text-dim); }
+.checkbox-label { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 0.88rem; cursor: pointer; padding-top: 8px; }
 .checkbox-label input { accent-color: var(--accent); }
 
 /* Protocol grid */
