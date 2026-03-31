@@ -720,6 +720,20 @@
 
     <!-- TAB: Block Page -->
     <div v-if="activeTab === 'blockpage'" class="tab-content">
+      <!-- Block Page Domain -->
+      <div class="subsection" style="margin-bottom:20px">
+        <h4>Block Page Domain</h4>
+        <p class="section-desc">Set a domain name that resolves to your block page. Blocked sites will show this domain in the browser address bar instead of a raw IP.</p>
+        <div style="display:flex;gap:8px;align-items:center;max-width:500px">
+          <input v-model="bpDomain" placeholder="block.mynetwork.com" style="flex:1" />
+          <button @click="saveBlockPageDomain" class="btn-primary">Save</button>
+        </div>
+        <p v-if="bpDomainMsg" class="msg-success" style="margin-top:6px">{{ bpDomainMsg }}</p>
+        <p class="section-desc" style="font-size:0.72rem;margin-top:6px" v-if="bpDomain">
+          DNS Supreme will automatically resolve <code style="color:var(--accent)">{{ bpDomain }}</code> to your server's block page IP. No zone configuration needed.
+        </p>
+      </div>
+
       <div class="bp-split">
         <!-- Left: Builder -->
         <div class="bp-builder">
@@ -1628,6 +1642,8 @@ async function generateZoneCert(zoneName: string) {
 
 const blockPageHTML = ref('')
 const bpMsg = ref('')
+const bpDomain = ref('')
+const bpDomainMsg = ref('')
 const bpMode = ref('visual')
 const bpLogo = ref('')
 const bpHeading = ref('Access Blocked')
@@ -1723,11 +1739,12 @@ const logMsg = ref('')
 
 // --- Load ---
 async function loadAll() {
-  const [fw, dk, certs, bp, ss, hn, pd, cl, ls, lr] = await Promise.all([
+  const [fw, dk, certs, bp, bpd, ss, hn, pd, cl, ls, lr] = await Promise.all([
     axios.get('/api/settings/forwarders'),
     axios.get('/api/dnssec'),
     axios.get('/api/certs'),
     axios.get('/api/settings/blockpage'),
+    axios.get('/api/settings/blockpage/domain'),
     axios.get('/api/settings/server'),
     axios.get('/api/settings/hostname'),
     axios.get('/api/settings/primary-domain'),
@@ -1739,6 +1756,7 @@ async function loadAll() {
   dnssecKeys.value = dk.data || []
   certInfo.value = certs.data
   blockPageHTML.value = bp.data.html || ''
+  bpDomain.value = bpd.data.domain || ''
   if (bp.data.settings) {
     const s = bp.data.settings
     if (s.logo) bpLogo.value = s.logo
@@ -1980,6 +1998,17 @@ function formatDate(d: string) {
 }
 
 // --- Block Page ---
+async function saveBlockPageDomain() {
+  bpDomainMsg.value = ''
+  try {
+    await axios.put('/api/settings/blockpage/domain', { domain: bpDomain.value })
+    bpDomainMsg.value = bpDomain.value ? 'Block page domain saved' : 'Block page domain cleared'
+    setTimeout(() => bpDomainMsg.value = '', 3000)
+  } catch (e: any) {
+    bpDomainMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+  }
+}
+
 async function saveBlockPage() {
   bpMsg.value = ''
   const html = blockPageHTML.value || generateVisualHTML()

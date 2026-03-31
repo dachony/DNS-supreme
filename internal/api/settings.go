@@ -146,4 +146,32 @@ func (s *Server) LoadBlockPageTemplate() {
 	if html := s.db.GetSetting("block_page_html"); html != "" && s.blockPage != nil {
 		s.blockPage.SetCustomTemplate(html)
 	}
+	// Load block page domain
+	if domain := s.db.GetSetting("block_page_domain"); domain != "" {
+		s.dns.SetBlockPageDomain(domain)
+	}
+}
+
+func (s *Server) getBlockPageDomain(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"domain": s.dns.GetBlockPageDomain()})
+}
+
+type blockPageDomainReq struct {
+	Domain string `json:"domain"`
+}
+
+func (s *Server) setBlockPageDomain(c *gin.Context) {
+	var req blockPageDomainReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s.dns.SetBlockPageDomain(req.Domain)
+	s.db.SetSetting("block_page_domain", req.Domain)
+
+	userID, _ := c.Get("userID")
+	username, _ := c.Get("username")
+	s.db.LogAudit(userID.(int), username.(string), "settings_change", "Block page domain set to: "+req.Domain, c.ClientIP())
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "domain": req.Domain})
 }

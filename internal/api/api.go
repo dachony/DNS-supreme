@@ -189,6 +189,7 @@ func (s *Server) setupRoutes() {
 
 		// Settings (read)
 		protected.GET("/settings/blockpage", s.getBlockPageTemplate)
+		protected.GET("/settings/blockpage/domain", s.getBlockPageDomain)
 		protected.GET("/settings/forwarders", s.getForwarders)
 		protected.GET("/settings/server", s.getServerSettings)
 		protected.GET("/settings/hostname", s.getHostname)
@@ -256,6 +257,7 @@ func (s *Server) setupRoutes() {
 			// Settings (write)
 			admin.PUT("/settings/blockpage", s.setBlockPageTemplate)
 			admin.POST("/settings/blockpage/upload-logo", s.uploadBlockPageLogo)
+		admin.PUT("/settings/blockpage/domain", s.setBlockPageDomain)
 			admin.PUT("/settings/forwarders", s.setForwarders)
 			admin.PUT("/settings/server", s.updateServerSettings)
 			admin.PUT("/settings/hostname", s.setHostname)

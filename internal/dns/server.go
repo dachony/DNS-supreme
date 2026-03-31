@@ -51,6 +51,7 @@ type Server struct {
 	zoneLookup    ZoneLookupFunc
 	zoneDataFn    ZoneDataFunc
 	blockPageIP      net.IP
+	blockPageDomain  string
 	onBlock          func(domain, reason string)
 	responseFilterFn ResponseFilterFunc
 	axfrAllowIPs     []net.IPNet
@@ -182,6 +183,18 @@ func (s *Server) SetBlockPage(ip string, onBlock func(domain, reason string)) {
 	defer s.mu.Unlock()
 	s.blockPageIP = net.ParseIP(ip)
 	s.onBlock = onBlock
+}
+
+func (s *Server) SetBlockPageDomain(domain string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blockPageDomain = strings.TrimSuffix(strings.ToLower(domain), ".")
+}
+
+func (s *Server) GetBlockPageDomain() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.blockPageDomain
 }
 
 func NewServer(cfg config.DNSConfig, filterFn FilterFunc, logFn LogFunc, tlsCfg *tls.Config) *Server {
@@ -493,6 +506,32 @@ func (s *Server) processDNSMsg(r *dns.Msg, clientAddr string, protocol string) *
 		QueryType:      dns.TypeToString[qtype],
 		Timestamp:      start,
 		Protocol:       protocol,
+	}
+
+	// Block page domain resolves to block page IP
+	s.mu.RLock()
+	bpDomain := s.blockPageDomain
+	bpIPForDomain := s.blockPageIP
+	s.mu.RUnlock()
+	if bpDomain != "" && bpIPForDomain != nil {
+		queryDomain := strings.TrimSuffix(strings.ToLower(domain), ".")
+		if queryDomain == bpDomain && (qtype == dns.TypeA || qtype == dns.TypeAAAA) {
+			msg := new(dns.Msg)
+			msg.SetReply(r)
+			if qtype == dns.TypeA && bpIPForDomain.To4() != nil {
+				msg.Answer = append(msg.Answer, &dns.A{
+					Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+					A:   bpIPForDomain.To4(),
+				})
+			}
+			result.Upstream = "blockpage"
+			result.ResponseIP = bpIPForDomain.String()
+			result.Latency = time.Since(start)
+			if s.logFn != nil {
+				s.logFn(result)
+			}
+			return msg
+		}
 	}
 
 	// Filter check
