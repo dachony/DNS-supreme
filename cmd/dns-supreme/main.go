@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -131,8 +132,16 @@ func main() {
 
 	// Connect block page to DNS server
 	blockPageIP := os.Getenv("BLOCK_PAGE_IP")
-	if blockPageIP == "" {
-		blockPageIP = "0.0.0.0" // container IP — will be set via env in docker-compose
+	if blockPageIP == "" || blockPageIP == "0.0.0.0" {
+		// Auto-detect host IP from default route
+		if conn, err := net.Dial("udp", "8.8.8.8:53"); err == nil {
+			blockPageIP = conn.LocalAddr().(*net.UDPAddr).IP.String()
+			conn.Close()
+			slog.Info("auto-detected block page IP", "ip", blockPageIP)
+		} else {
+			blockPageIP = "0.0.0.0"
+			slog.Warn("could not detect block page IP, set BLOCK_PAGE_IP env var")
+		}
 	}
 	dnsServer.SetBlockPage(blockPageIP, func(domain, reason string) {
 		blockPageServer.RecordBlock(domain, reason)

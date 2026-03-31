@@ -22,6 +22,7 @@ services:
       - API_PORT=5380
       - BLOCKPAGE_HTTP_PORT=80
       - BLOCKPAGE_HTTPS_PORT=443
+      - BLOCK_PAGE_IP=${BLOCK_PAGE_IP:-}
     dns:
       - 8.8.8.8
       - 1.1.1.1
