@@ -366,6 +366,36 @@ func (s *Server) Start() error {
 			os.Exit(1)
 		}
 	}()
+
+	// Start HTTPS management panel if enabled
+	mgmtHTTPS := false
+	if data := s.db.GetSetting("server_settings"); data != "" {
+		var ss struct {
+			ManagementHTTPS bool `json:"management_https"`
+		}
+		if json.Unmarshal([]byte(data), &ss) == nil {
+			mgmtHTTPS = ss.ManagementHTTPS
+		}
+	}
+	if mgmtHTTPS && s.cfg.HTTPSPort > 0 {
+		httpsAddr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.HTTPSPort)
+		certFile, keyFile := "/app/certs/server.crt", "/app/certs/server.key"
+		if _, err := os.Stat(certFile); os.IsNotExist(err) {
+			slog.Warn("management HTTPS enabled but no certificate found", "component", "api", "cert", certFile)
+		} else {
+			go func() {
+				slog.Info("management HTTPS starting", "component", "api", "addr", httpsAddr)
+				httpsServer := &http.Server{
+					Addr:    httpsAddr,
+					Handler: s.router,
+				}
+				if err := httpsServer.ListenAndServeTLS(certFile, keyFile); err != nil {
+					slog.Error("management HTTPS failed", "component", "api", "error", err)
+				}
+			}()
+		}
+	}
+
 	return nil
 }
 
