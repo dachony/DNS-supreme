@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -172,8 +173,30 @@ func (a *ACMEClient) RequestCertificate(domain string) error {
 					dnsClear(fqdn)
 				}
 			}()
-			// Wait for propagation
-			time.Sleep(5 * time.Second)
+			// Wait for DNS propagation — poll until TXT is visible or timeout
+			slog.Info("waiting for DNS propagation", "component", "acme", "fqdn", fqdn)
+			propagated := false
+			for attempt := 0; attempt < 12; attempt++ {
+				time.Sleep(10 * time.Second)
+				// Check if TXT record is resolvable
+				txts, err := net.LookupTXT(fqdn)
+				if err == nil {
+					for _, t := range txts {
+						if t == txtValue {
+							propagated = true
+							break
+						}
+					}
+				}
+				if propagated {
+					slog.Info("DNS propagation confirmed", "component", "acme", "fqdn", fqdn, "attempt", attempt+1)
+					break
+				}
+				slog.Info("DNS not propagated yet, retrying", "component", "acme", "fqdn", fqdn, "attempt", attempt+1)
+			}
+			if !propagated {
+				slog.Warn("DNS propagation timeout, proceeding anyway", "component", "acme", "fqdn", fqdn)
+			}
 		}
 
 		// Accept challenge
@@ -196,7 +219,7 @@ func (a *ACMEClient) RequestCertificate(domain string) error {
 	// Create CSR
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
 		Subject:  pkix.Name{CommonName: domain},
-		DNSNames: []string{domain, "*." + domain},
+		DNSNames: []string{domain},
 	}, certKey)
 	if err != nil {
 		return fmt.Errorf("create CSR: %w", err)
@@ -230,11 +253,14 @@ func (a *ACMEClient) RequestCertificate(domain string) error {
 	pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	keyFile.Close()
 
-	// Also copy as server cert if it's the primary
+	// Only copy as server.crt if no server cert exists yet
+	// (block page certs should NOT overwrite the main server cert)
 	serverCert := filepath.Join(a.certDir, "server.crt")
 	serverKey := filepath.Join(a.certDir, "server.key")
-	copyFile(certPath, serverCert)
-	copyFile(keyPath, serverKey)
+	if _, err := os.Stat(serverCert); os.IsNotExist(err) {
+		copyFile(certPath, serverCert)
+		copyFile(keyPath, serverKey)
+	}
 
 	slog.Info("certificate obtained", "component", "acme", "domain", domain, "path", certPath)
 	return nil

@@ -304,6 +304,36 @@ func (s *Server) getACMEStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
+// wireACMESolver sets up the DNS solver based on ACME config (local or Cloudflare)
+func (s *Server) wireACMESolver() {
+	cfg := s.acmeClient.GetConfig()
+	if cfg.DNSProvider == "cloudflare" && cfg.CloudflareToken != "" {
+		slog.Info("using Cloudflare DNS-01 solver", "component", "acme")
+		s.acmeClient.SetDNSSolver(
+			func(fqdn, value string) error {
+				slog.Info("setting Cloudflare TXT record", "component", "acme", "fqdn", fqdn)
+				return s.acmeClient.CloudflareDNSSet(fqdn, value)
+			},
+			func(fqdn string) error {
+				slog.Info("clearing Cloudflare TXT record", "component", "acme", "fqdn", fqdn)
+				return s.acmeClient.CloudflareDNSClear(fqdn)
+			},
+		)
+	} else {
+		slog.Info("using local DNS-01 solver", "component", "acme")
+		s.acmeClient.SetDNSSolver(
+			func(fqdn, value string) error {
+				slog.Info("setting local DNS TXT record", "component", "acme", "fqdn", fqdn)
+				return s.db.CreateACMERecord(fqdn, value)
+			},
+			func(fqdn string) error {
+				slog.Info("clearing local DNS TXT record", "component", "acme", "fqdn", fqdn)
+				return s.db.DeleteACMERecord(fqdn)
+			},
+		)
+	}
+}
+
 func (s *Server) requestACMECert(c *gin.Context) {
 	var req acmeRequestReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -315,19 +345,8 @@ func (s *Server) requestACMECert(c *gin.Context) {
 		return
 	}
 
-	// Wire DNS solver to create TXT records in our zones
-	s.acmeClient.SetDNSSolver(
-		func(fqdn, value string) error {
-			// Find or create zone for this domain
-			// Add TXT record _acme-challenge
-			slog.Info("setting DNS TXT record", "component", "acme", "fqdn", fqdn, "value", value)
-			return s.db.CreateACMERecord(fqdn, value)
-		},
-		func(fqdn string) error {
-			slog.Info("clearing DNS TXT record", "component", "acme", "fqdn", fqdn)
-			return s.db.DeleteACMERecord(fqdn)
-		},
-	)
+	// Wire DNS solver based on config (local or Cloudflare)
+	s.wireACMESolver()
 
 	// Store status and run in background
 	s.db.SetSetting("acme_status_"+req.Domain, `{"status":"pending","domain":"`+req.Domain+`"}`)

@@ -144,17 +144,24 @@
               <div class="sys-bar"><div class="sys-bar-fill" :style="{ width: sysMetrics.memory.usage_percent + '%' }" :class="barColor(sysMetrics.memory.usage_percent)"></div></div>
               <span class="sys-sub">{{ fmtBytes(sysMetrics.memory.used_bytes) }} / {{ fmtBytes(sysMetrics.memory.total_bytes) }}</span>
             </div>
+            <div class="sys-item" v-if="sysMetrics.app">
+              <div class="sys-row"><span class="sys-label">App Memory</span><span class="sys-val">{{ fmtBytes(sysMetrics.app.heap_alloc) }}</span></div>
+              <div class="sys-bar"><div class="sys-bar-fill" :style="{ width: appMemPercent + '%' }" :class="barColor(appMemPercent)"></div></div>
+              <span class="sys-sub">{{ fmtBytes(sysMetrics.app.heap_alloc) }} / {{ fmtBytes(sysMetrics.app.heap_sys) }} heap &middot; {{ sysMetrics.app.goroutines }} goroutines</span>
+            </div>
             <div class="sys-item">
               <div class="sys-row"><span class="sys-label">Disk</span><span class="sys-val">{{ sysMetrics.disk.usage_percent?.toFixed(0) }}%</span></div>
               <div class="sys-bar"><div class="sys-bar-fill" :style="{ width: sysMetrics.disk.usage_percent + '%' }" :class="barColor(sysMetrics.disk.usage_percent)"></div></div>
               <span class="sys-sub">{{ fmtBytes(sysMetrics.disk.used_bytes) }} / {{ fmtBytes(sysMetrics.disk.total_bytes) }}</span>
             </div>
+            <div class="sys-item" v-if="sysMetrics.disk.app_size_bytes">
+              <div class="sys-row"><span class="sys-label">App Disk</span><span class="sys-val">{{ fmtBytes(sysMetrics.disk.app_size_bytes) }}</span></div>
+              <div class="sys-bar"><div class="sys-bar-fill" :style="{ width: appDiskPercent + '%' }" :class="barColor(appDiskPercent)"></div></div>
+              <span class="sys-sub">{{ fmtBytes(sysMetrics.disk.app_size_bytes) }} / {{ fmtBytes(sysMetrics.disk.total_bytes) }}</span>
+            </div>
             <div class="sys-item">
               <div class="sys-row"><span class="sys-label">Database</span><span class="sys-val">{{ sysMetrics.database.size_human }}</span></div>
               <span class="sys-sub">{{ sysMetrics.database.query_count?.toLocaleString() }} log entries</span>
-            </div>
-            <div class="sys-item">
-              <div class="sys-row"><span class="sys-label">Goroutines</span><span class="sys-val">{{ sysMetrics.goroutines }}</span></div>
             </div>
           </div>
         </div>
@@ -168,6 +175,13 @@
               <div class="prot-info">
                 <span class="prot-name">Blocklists</span>
                 <span class="prot-detail">{{ serverStatus.total_lists }} lists &middot; {{ serverStatus.total_domains?.toLocaleString() }} domains</span>
+              </div>
+            </div>
+            <div class="prot-row clickable" v-if="sysMetrics?.app?.filter_domains" @click="goToBlocklists()">
+              <div class="prot-dot prot-filter"></div>
+              <div class="prot-info">
+                <span class="prot-name">Filter Engine</span>
+                <span class="prot-detail active">{{ sysMetrics.app.filter_domains?.toLocaleString() }} domains loaded{{ sysMetrics.app.blocked_services > 0 ? ' + ' + sysMetrics.app.blocked_services + ' services' : '' }}</span>
               </div>
             </div>
             <div class="prot-row clickable" @click="goToBlocklists()">
@@ -213,6 +227,16 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 const router = useRouter()
 const stats = ref<any>(null)
 const sysMetrics = ref<any>(null)
+const appMemPercent = computed(() => {
+  const app = sysMetrics.value?.app
+  if (!app || !app.heap_sys) return 0
+  return Math.min(100, Math.round((app.heap_alloc / app.heap_sys) * 100))
+})
+const appDiskPercent = computed(() => {
+  const d = sysMetrics.value?.disk
+  if (!d || !d.total_bytes) return 0
+  return Math.min(100, Math.round((d.app_size_bytes / d.total_bytes) * 100))
+})
 const serverStatus = ref<any>(null)
 const hours = ref(24)
 const loading = ref(false)
@@ -321,6 +345,13 @@ function fmtUptime(s: number): string {
   if (d > 0) return `${d}d ${h}h ${m}m`
   if (h > 0) return `${h}h ${m}m`
   return `${m}m`
+}
+
+function fmtNs(ns: number): string {
+  if (!ns) return '0ms'
+  if (ns < 1000) return ns + 'ns'
+  if (ns < 1_000_000) return (ns / 1000).toFixed(1) + 'us'
+  return (ns / 1_000_000).toFixed(2) + 'ms'
 }
 
 function barColor(pct: number): string {
@@ -476,6 +507,7 @@ td { padding: 5px 3px; font-size: 0.75rem; }
 .prot-dot.prot-np { background: #a855f7; }
 .prot-dot.prot-geo { background: #22c55e; }
 .prot-dot.prot-ban { background: #fbbf24; }
+.prot-dot.prot-filter { background: #ec4899; }
 .prot-info { display: flex; flex-direction: column; gap: 1px; }
 .prot-name { font-size: 0.78rem; color: var(--text-primary); font-weight: 500; }
 .prot-detail { font-size: 0.68rem; color: var(--text-muted); }

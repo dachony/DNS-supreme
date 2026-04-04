@@ -218,8 +218,11 @@
                 {{ serverSettings.mgmtHTTPS ? 'HTTPS will be enabled on port 53443.' : 'HTTPS for management panel will be disabled.' }}
                 A server restart is required to apply this change.
               </p>
+              <p v-if="serverSettings.mgmtHTTPS && !certInfo" class="section-desc" style="color:#f59e0b;margin:4px 0;font-size:0.78rem">
+                No certificate configured. Go to the Certificates tab to generate or request one first.
+              </p>
               <div style="display:flex;gap:8px">
-                <button @click="applyMgmtHttps" class="btn-primary">Apply &amp; Restart</button>
+                <button @click="applyMgmtHttps" class="btn-primary" :disabled="serverSettings.mgmtHTTPS && !certInfo">Apply &amp; Restart</button>
                 <button @click="cancelMgmtHttps" class="btn-text">Cancel</button>
               </div>
             </div>
@@ -372,7 +375,7 @@
         <h4>Server Certificate</h4>
         <div class="cert-mode-toggle">
           <button :class="{ active: certMode === 'self-signed' }" @click="certMode = 'self-signed'">Self-Signed</button>
-          <button :class="{ active: certMode === 'acme' }" @click="certMode = 'acme'">Let's Encrypt / ACME</button>
+          <button :class="{ active: certMode === 'acme' }" @click="certMode = 'acme'">ACME</button>
           <button :class="{ active: certMode === 'upload' }" @click="certMode = 'upload'">Upload Custom</button>
         </div>
 
@@ -506,33 +509,41 @@
           </div>
         </div>
 
+        <div class="section-actions" style="margin-top:12px">
+          <button @click="saveAcme" class="btn-primary">Save Settings</button>
+          <button @click="requestAcmeCert" :disabled="!acmeEmail || !acmeDomain || acmeRequesting" class="btn-secondary">
+            {{ acmeRequesting ? 'Requesting...' : 'Request Certificate' }}
+          </button>
+        </div>
+
         <!-- ACME Status -->
-        <div class="acme-status" v-if="acmeStatus">
+        <div class="acme-status" v-if="acmeStatus" style="margin-top:12px">
           <div class="detail-row">
             <span class="detail-label">Status</span>
             <span class="detail-value">
-              <span class="acme-status-badge" :class="acmeStatus.status">{{ acmeStatus.status }}</span>
+              <span class="acme-status-badge" :class="acmeStatus.status">
+                {{ acmeStatus.status === 'pending' ? 'Requesting...' : acmeStatus.status === 'issued' ? 'Issued' : acmeStatus.status === 'failed' ? 'Failed' : acmeStatus.status }}
+              </span>
             </span>
           </div>
           <div class="detail-row" v-if="acmeStatus.domain">
             <span class="detail-label">Domain</span>
             <span class="detail-value">{{ acmeStatus.domain }}</span>
           </div>
-          <div class="detail-row" v-if="acmeStatus.issued_at">
-            <span class="detail-label">Issued</span>
-            <span class="detail-value">{{ formatDate(acmeStatus.issued_at) }}</span>
+          <div class="detail-row" v-if="acmeStatus.error">
+            <span class="detail-label">Error</span>
+            <span class="detail-value" style="color:#ef4444;font-size:0.78rem">{{ acmeStatus.error }}</span>
           </div>
-          <div class="detail-row" v-if="acmeStatus.next_renewal">
-            <span class="detail-label">Next Renewal</span>
-            <span class="detail-value">{{ formatDate(acmeStatus.next_renewal) }}</span>
+          <div v-if="acmeStatus.status === 'issued'" class="acme-apply">
+            <p class="section-desc" style="color:#22c55e;margin:8px 0">Certificate issued successfully. Restart to apply.</p>
+            <button @click="applyAcmeCert" class="btn-primary">Apply &amp; Restart</button>
+          </div>
+          <div v-if="acmeStatus.status === 'failed'" style="margin-top:8px">
+            <button @click="requestAcmeCert" :disabled="acmeRequesting" class="btn-secondary">Retry</button>
           </div>
         </div>
 
-        <div class="section-actions" style="margin-top:12px">
-          <button @click="saveAcme" class="btn-primary">Save Settings</button>
-          <button @click="requestAcmeCert" :disabled="!acmeEmail || !acmeDomain" class="btn-secondary">Request Certificate Now</button>
-        </div>
-        <div v-if="acmeMsg" class="msg-success">{{ acmeMsg }}</div>
+        <div v-if="acmeMsg" :class="acmeMsg.startsWith('Failed') ? 'msg-error' : 'msg-success'" style="margin-top:8px">{{ acmeMsg }}</div>
       </div>
 
       <!-- MODE: Upload Custom -->
@@ -1630,6 +1641,8 @@ async function loadAcmeConfig() {
     if (data.email) acmeEmail.value = data.email
     if (data.url) acmeUrl.value = data.url
     if (data.challenge) acmeChallenge.value = data.challenge
+    if (data.dns_provider) acmeDnsProvider.value = data.dns_provider
+    if (data.cloudflare_token) acmeCloudflareToken.value = data.cloudflare_token
   } catch {}
 }
 
@@ -1639,20 +1652,70 @@ async function saveAcme() {
     await axios.put('/api/acme/config', {
       provider: acmeProvider.value, email: acmeEmail.value,
       url: acmeUrl.value, challenge: acmeChallenge.value,
+      dns_provider: acmeDnsProvider.value, cloudflare_token: acmeCloudflareToken.value,
     })
     acmeMsg.value = 'ACME settings saved'
     setTimeout(() => acmeMsg.value = '', 3000)
   } catch (e: any) { acmeMsg.value = 'Failed: ' + (e.response?.data?.error || e.message) }
 }
 
+const acmeRequesting = ref(false)
+
 async function requestAcmeCert() {
-  acmeMsg.value = 'Requesting certificate...'
+  const domain = acmeDomain.value
+  if (!domain || !acmeEmail.value) return
+  acmeRequesting.value = true
+  acmeMsg.value = ''
+  acmeStatus.value = { status: 'pending', domain }
   try {
-    const domain = primaryDomain.value || 'dnssupreme.local'
+    await saveAcme()
     await axios.post('/api/acme/request', { domain })
-    acmeMsg.value = `Certificate request started for ${domain}. This may take a minute.`
-    setTimeout(() => { acmeMsg.value = ''; requestRestart() }, 10000)
-  } catch (e: any) { acmeMsg.value = 'Failed: ' + (e.response?.data?.error || e.message) }
+    acmeMsg.value = `Certificate request started for ${domain}. Waiting for DNS validation...`
+    pollAcmeStatus(domain)
+  } catch (e: any) {
+    acmeMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+    acmeRequesting.value = false
+    acmeStatus.value = { status: 'failed', domain, error: acmeMsg.value }
+  }
+}
+
+async function pollAcmeStatus(domain: string) {
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000))
+    try {
+      const { data } = await axios.get(`/api/acme/status/${domain}`)
+      acmeStatus.value = data
+      if (data.status === 'issued') {
+        acmeMsg.value = 'Certificate issued! Click "Apply & Restart" to use it.'
+        acmeRequesting.value = false
+        return
+      } else if (data.status === 'failed') {
+        acmeMsg.value = ''
+        acmeRequesting.value = false
+        return
+      }
+    } catch { break }
+  }
+  acmeRequesting.value = false
+}
+
+async function applyAcmeCert() {
+  acmeMsg.value = 'Applying certificate and restarting...'
+  try {
+    await axios.post('/api/restart')
+  } catch {}
+  await waitForServer()
+  acmeMsg.value = 'Certificate applied. Server restarted.'
+  loadAll()
+  setTimeout(() => acmeMsg.value = '', 5000)
+}
+
+async function loadAcmeStatus() {
+  if (!acmeDomain.value) return
+  try {
+    const { data } = await axios.get(`/api/acme/status/${acmeDomain.value}`)
+    if (data.status && data.status !== 'none') acmeStatus.value = data
+  } catch {}
 }
 const certZones = ref<any[]>([])
 
@@ -1874,13 +1937,22 @@ async function applyMgmtHttps() {
   serverMsg.value = 'Restarting server...'
   try {
     await axios.post('/api/restart')
-    serverMsg.value = serverSettings.value.mgmtHTTPS
-      ? 'HTTPS enabled. Panel available at https://...:53443 after restart.'
-      : 'HTTPS disabled. Restart in progress.'
-    setTimeout(() => serverMsg.value = '', 6000)
-  } catch {
-    serverMsg.value = 'Settings saved but restart failed. Restart manually.'
-    setTimeout(() => serverMsg.value = '', 5000)
+  } catch {}
+  // Wait for server to come back
+  await waitForServer()
+  serverMsg.value = serverSettings.value.mgmtHTTPS
+    ? 'HTTPS enabled. Panel available at https://...:53443.'
+    : 'HTTPS disabled. Server restarted.'
+  setTimeout(() => serverMsg.value = '', 6000)
+}
+
+async function waitForServer() {
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    try {
+      await axios.get('/api/health')
+      return
+    } catch {}
   }
 }
 
@@ -2225,6 +2297,7 @@ onMounted(async () => {
   await loadAll()
   loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings(); loadAcmeConfig()
   loadBpZones()
+  nextTick(() => loadAcmeStatus())
   // Parse existing bpDomain into prefix + zone
   if (bpDomain.value && bpDomain.value.includes('.')) {
     const dot = bpDomain.value.indexOf('.')

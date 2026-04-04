@@ -334,13 +334,13 @@ func (s *Server) restartServer(c *gin.Context) {
 	slog.Info("server restart requested via API", "component", "api")
 	c.JSON(http.StatusOK, gin.H{"status": "restarting"})
 
-	// Graceful restart: signal the process to restart
+	// Full restart: send SIGTERM so Docker restarts the container
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		// Send SIGHUP to self for graceful restart
 		p, err := os.FindProcess(os.Getpid())
 		if err == nil {
-			p.Signal(syscall.SIGHUP)
+			slog.Info("sending SIGTERM for full restart", "component", "api")
+			p.Signal(syscall.SIGTERM)
 		}
 	}()
 }

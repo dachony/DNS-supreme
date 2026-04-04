@@ -54,6 +54,7 @@ type Server struct {
 	blockPageDomain  string
 	onBlock          func(domain, reason string)
 	responseFilterFn ResponseFilterFunc
+	acmeTxtLookup    func(fqdn string) string // lookup ACME challenge TXT records
 	axfrAllowIPs     []net.IPNet
 	dnssecMgr        *DNSSECManager
 	hostnameCache    map[string]string // IP -> hostname cache
@@ -195,6 +196,22 @@ func (s *Server) GetBlockPageDomain() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.blockPageDomain
+}
+
+func (s *Server) GetBlockPageIP() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.blockPageIP == nil {
+		return ""
+	}
+	return s.blockPageIP.String()
+}
+
+// SetACMETxtLookup sets the function to resolve ACME DNS-01 challenge TXT records
+func (s *Server) SetACMETxtLookup(fn func(fqdn string) string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.acmeTxtLookup = fn
 }
 
 func NewServer(cfg config.DNSConfig, filterFn FilterFunc, logFn LogFunc, tlsCfg *tls.Config) *Server {
@@ -531,6 +548,32 @@ func (s *Server) processDNSMsg(r *dns.Msg, clientAddr string, protocol string) *
 				s.logFn(result)
 			}
 			return msg
+		}
+	}
+
+	// ACME DNS-01 challenge — serve TXT records for _acme-challenge domains
+	if qtype == dns.TypeTXT && strings.HasPrefix(strings.ToLower(domain), "_acme-challenge.") {
+		s.mu.RLock()
+		acmeLookup := s.acmeTxtLookup
+		s.mu.RUnlock()
+		if acmeLookup != nil {
+			fqdn := strings.TrimSuffix(strings.ToLower(domain), ".")
+			if txtValue := acmeLookup(fqdn); txtValue != "" {
+				msg := new(dns.Msg)
+				msg.SetReply(r)
+				msg.Authoritative = true
+				msg.Answer = append(msg.Answer, &dns.TXT{
+					Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 60},
+					Txt: []string{txtValue},
+				})
+				result.Upstream = "acme"
+				result.Latency = time.Since(start)
+				slog.Info("served ACME challenge TXT", "component", "dns", "fqdn", fqdn, "value", txtValue[:8]+"...")
+				if s.logFn != nil {
+					s.logFn(result)
+				}
+				return msg
+			}
 		}
 	}
 

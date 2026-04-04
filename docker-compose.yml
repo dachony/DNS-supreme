@@ -28,6 +28,7 @@ services:
       - 1.1.1.1
     volumes:
       - geoipdata:/app/data
+      - certdata:/app/certs
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +57,7 @@ services:
 volumes:
   pgdata:
   geoipdata:
+  certdata:
 
 networks:
   dns-net:

@@ -102,6 +102,11 @@ func main() {
 		}
 	}
 
+	// Connect ACME DNS-01 challenge TXT lookup
+	dnsServer.SetACMETxtLookup(func(fqdn string) string {
+		return database.GetSetting("acme_txt_" + fqdn)
+	})
+
 	// Connect zone lookup to database
 	dnsServer.SetZoneLookup(func(name, rtype string) ([]db.DNSRecord, error) {
 		return database.FindRecords(name, rtype)

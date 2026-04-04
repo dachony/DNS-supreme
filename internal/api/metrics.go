@@ -22,11 +22,26 @@ type certAlert struct {
 	Warning   bool   `json:"warning"`
 }
 
+type appMetrics struct {
+	HeapAlloc    uint64 `json:"heap_alloc"`     // bytes allocated on heap
+	HeapSys      uint64 `json:"heap_sys"`       // bytes obtained from OS for heap
+	StackInuse   uint64 `json:"stack_inuse"`    // bytes in stack spans
+	TotalAlloc   uint64 `json:"total_alloc"`    // cumulative bytes allocated
+	NumGC        uint32 `json:"num_gc"`         // completed GC cycles
+	LastGCPause  uint64 `json:"last_gc_pause"`  // nanoseconds of last GC pause
+	Goroutines   int    `json:"goroutines"`
+	FilterDomains int   `json:"filter_domains"` // domains loaded in filter engine
+	FilterLists   int   `json:"filter_lists"`   // active blocklists
+	CacheSize     int   `json:"cache_size"`     // filter cache entries (approx)
+	BlockedSvcs   int   `json:"blocked_services"` // enabled service blocks
+}
+
 type systemMetrics struct {
 	CPU        cpuMetrics  `json:"cpu"`
 	Memory     memMetrics  `json:"memory"`
 	Disk       diskMetrics `json:"disk"`
 	Database   dbMetrics   `json:"database"`
+	App        appMetrics  `json:"app"`
 	Uptime     int64       `json:"uptime_seconds"`
 	GoRoutines int         `json:"goroutines"`
 	Certs      []certAlert `json:"certs"`
@@ -83,6 +98,23 @@ func (s *Server) getSystemMetrics(c *gin.Context) {
 
 	metrics.Database = s.getDBMetrics()
 	metrics.Certs = s.getCertAlerts()
+
+	// Application-specific metrics
+	filterDomains, filterLists := s.filter.Stats()
+	metrics.App = appMetrics{
+		HeapAlloc:     m.Alloc,
+		HeapSys:       m.Sys,
+		StackInuse:    m.StackInuse,
+		TotalAlloc:    m.TotalAlloc,
+		NumGC:         m.NumGC,
+		Goroutines:    runtime.NumGoroutine(),
+		FilterDomains: filterDomains,
+		FilterLists:   filterLists,
+		BlockedSvcs:   len(s.filter.ServiceBlocker().GetEnabledServiceIDs()),
+	}
+	if m.NumGC > 0 {
+		metrics.App.LastGCPause = m.PauseNs[(m.NumGC+255)%256]
+	}
 
 	c.JSON(http.StatusOK, metrics)
 }

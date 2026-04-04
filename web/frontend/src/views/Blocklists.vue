@@ -39,6 +39,38 @@
           </div>
 
           <div class="services-section">
+            <h3>Block Services</h3>
+            <p class="section-desc">Block popular platforms by category.</p>
+            <div class="svc-item master" :class="{ disabled: bsTotalBlocked === 0 }" @click="activeTab = 'block-services'">
+              <span class="svc-icon svc-icon-bs">BS</span>
+              <div class="svc-info">
+                <span class="svc-name">Service Blocking</span>
+                <span class="svc-count">{{ bsTotalBlocked > 0 ? bsTotalBlocked + ' services blocked (' + bsTotalDomains + ' domains)' : 'No services blocked' }}</span>
+              </div>
+              <div class="toggle" :class="{ on: bsTotalBlocked > 0 }"><div class="toggle-knob"></div></div>
+            </div>
+            <div class="svc-bs-cats" v-if="blockServiceCategories.length">
+              <div v-for="cat in blockServiceCategories" :key="cat.id" class="svc-bs-cat" :class="{ active: bsCatEnabledCount(cat) > 0 }">
+                <span class="svc-bs-cat-icon" :class="'bs-cat-icon-' + cat.id">{{ cat.icon }}</span>
+                <span class="svc-bs-cat-name">{{ cat.name }}</span>
+                <span class="svc-bs-cat-count">{{ bsCatEnabledCount(cat) }}/{{ cat.services.length }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="services-section">
+            <h3>Network Protection</h3>
+            <div class="svc-item master" :class="{ disabled: !npEnabled }" @click="isAdmin && toggleNpMaster()" :style="!isAdmin ? 'cursor: default' : ''">
+              <span class="svc-icon svc-icon-np">NP</span>
+              <div class="svc-info">
+                <span class="svc-name">Network Protection</span>
+                <span class="svc-count">Tor, botnets, malicious IPs, Spamhaus, URLhaus</span>
+              </div>
+              <div class="toggle" :class="{ on: npEnabled, disabled: !isAdmin }"><div class="toggle-knob"></div></div>
+            </div>
+          </div>
+
+          <div class="services-section">
             <h3>Country Blocking</h3>
             <div class="svc-item master" :class="{ disabled: !geoEnabled }" @click="activeTab = 'netprotect'">
               <span class="svc-icon svc-icon-geo">GEO</span>
@@ -126,8 +158,23 @@
         <div v-else-if="!filteredActiveLists.length" class="empty">No lists match the selected category.</div>
       </div>
 
-      <div class="stats-bar" v-if="totalDomains > 0">
-        Total: {{ totalDomains.toLocaleString() }} domains across {{ totalLists }} lists
+      <!-- Active Blocked Services -->
+      <div v-if="activeBlockedServices.length" class="al-section">
+        <h4 class="al-section-title">Blocked Services</h4>
+        <div class="al-list">
+          <div v-for="svc in activeBlockedServices" :key="svc.id" class="al-row al-row-svc" @click="activeTab = 'block-services'">
+            <span class="list-cat-badge service">service</span>
+            <div class="al-row-info">
+              <span class="al-row-name">{{ svc.name }}</span>
+              <span class="al-row-url">{{ svc.category }}</span>
+            </div>
+            <span class="al-row-count">{{ svc.domains.length }} domains</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-bar" v-if="totalDomains > 0 || activeBlockedServices.length">
+        Total: {{ (totalDomains + activeServiceDomains).toLocaleString() }} domains across {{ totalLists }} lists{{ activeBlockedServices.length ? ' + ' + activeBlockedServices.length + ' services' : '' }}
       </div>
 
       <!-- List detail modal -->
@@ -517,13 +564,14 @@ async function toggleNpMaster() {
 }
 
 const prioritySteps = [
-  { num: 1, title: 'Per-Device Allows', desc: 'If the device has an allow override for this domain, it passes through immediately.', result: 'allow' },
-  { num: 2, title: 'Global Allowlist', desc: 'Domains on the global allowlist always pass, regardless of blocklists.', result: 'allow' },
-  { num: 3, title: 'Per-Device Blocks', desc: 'Extra blocked domains configured for a specific device.', result: 'block' },
-  { num: 4, title: 'Custom Block Rules', desc: 'Manually blocked domains added by the admin.', result: 'block' },
-  { num: 5, title: 'Blocklists & Categories', desc: 'Matched against active blocklists (unless the category is disabled globally or per-device).', result: 'block' },
-  { num: 6, title: 'Network Protection', desc: 'After upstream resolve — if the destination IP is in a blocked country, Tor, botnet, or threat list.', result: 'block' },
-  { num: 7, title: 'Allowed', desc: 'No rules matched — query is forwarded to upstream DNS.', result: 'allow', pass: true },
+  { num: 1, title: 'Per-Device Allows', result: 'allow' },
+  { num: 2, title: 'Global Allowlist', result: 'allow' },
+  { num: 3, title: 'Block Services', result: 'block' },
+  { num: 4, title: 'Per-Device Blocks', result: 'block' },
+  { num: 5, title: 'Custom Block Rules', result: 'block' },
+  { num: 6, title: 'Blocklists & Categories', result: 'block' },
+  { num: 7, title: 'Network Protection', result: 'block' },
+  { num: 8, title: 'Allowed', result: 'allow', pass: true },
 ]
 
 // --- Blocklist Catalog ---
@@ -1181,6 +1229,23 @@ const bsTotalDomains = computed(() => {
   return count
 })
 
+// Flat list of all enabled blocked services (for Active Lists tab)
+const activeBlockedServices = computed(() => {
+  const result: any[] = []
+  for (const cat of blockServiceCategories.value) {
+    for (const svc of cat.services) {
+      if (svc.enabled) {
+        result.push({ ...svc, category: cat.name })
+      }
+    }
+  }
+  return result
+})
+
+const activeServiceDomains = computed(() => {
+  return activeBlockedServices.value.reduce((sum: number, svc: any) => sum + svc.domains.length, 0)
+})
+
 function bsCatEnabledCount(cat: any): number {
   return cat.services.filter((s: any) => s.enabled).length
 }
@@ -1269,7 +1334,32 @@ onMounted(() => {
 .svc-item:nth-child(5) .svc-icon { background: rgba(234,179,8,0.12); color: #eab308; }
 .svc-item:nth-child(6) .svc-icon { background: rgba(14,165,233,0.12); color: #0ea5e9; }
 .svc-icon-np { background: rgba(249,115,22,0.12) !important; color: #f97316 !important; }
+.svc-icon-bs { background: rgba(236,72,153,0.12) !important; color: #ec4899 !important; }
 .svc-icon-geo { background: rgba(139,92,246,0.12) !important; color: #8b5cf6 !important; }
+
+/* Block Services summary in Services tab */
+.svc-bs-cats {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+}
+.svc-bs-cat {
+  display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 0.75rem; opacity: 0.5; transition: all 0.15s;
+}
+.svc-bs-cat.active { opacity: 1; border-color: var(--accent); }
+.svc-bs-cat-icon {
+  width: 20px; height: 20px; border-radius: 5px; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 0.5rem; font-weight: 800;
+}
+.svc-bs-cat-name { color: var(--text-primary); font-weight: 500; }
+.svc-bs-cat-count { color: var(--text-muted); font-family: monospace; font-size: 0.7rem; }
+
+/* Active Lists sections */
+.al-section { margin-top: 16px; }
+.al-section-title { color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 8px; }
+.al-row-svc { border-left: 3px solid #ec4899; }
+.list-cat-badge.service { background: rgba(236,72,153,0.15); color: #ec4899; }
 
 .svc-info { flex: 1; }
 .svc-name { color: var(--text-primary); font-weight: 500; font-size: 0.88rem; display: block; text-transform: capitalize; }

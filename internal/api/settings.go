@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dachony/dns-supreme/internal/db"
 	"github.com/gin-gonic/gin"
 )
 
@@ -212,6 +213,9 @@ func (s *Server) setupBlockPageDomain(c *gin.Context) {
 	s.dns.SetBlockPageDomain(domain)
 	s.db.SetSetting("block_page_domain", domain)
 
+	// 1b. Create A record in the zone so it's visible in zone management
+	s.ensureBlockPageRecord(req.Prefix, req.Zone)
+
 	// 2. Set HTTP redirect immediately (works without cert)
 	httpURL := "http://" + domain
 	if s.blockPage != nil {
@@ -242,17 +246,8 @@ func (s *Server) setupBlockPageDomain(c *gin.Context) {
 	acmeCfg := s.acmeClient.GetConfig()
 	certStatus := "skipped"
 	if acmeCfg.Email != "" {
-		// Wire DNS solver
-		s.acmeClient.SetDNSSolver(
-			func(fqdn, value string) error {
-				slog.Info("setting DNS TXT record for block page", "component", "acme", "fqdn", fqdn, "value", value)
-				return s.db.CreateACMERecord(fqdn, value)
-			},
-			func(fqdn string) error {
-				slog.Info("clearing DNS TXT record for block page", "component", "acme", "fqdn", fqdn)
-				return s.db.DeleteACMERecord(fqdn)
-			},
-		)
+		// Wire DNS solver based on config (local or Cloudflare)
+		s.wireACMESolver()
 		s.db.SetSetting("acme_status_"+domain, `{"status":"pending","domain":"`+domain+`"}`)
 		certStatus = "requesting"
 
@@ -276,6 +271,45 @@ func (s *Server) setupBlockPageDomain(c *gin.Context) {
 	s.db.LogAudit(userID.(int), username.(string), "settings_change", "Block page domain setup: "+domain, c.ClientIP())
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "domain": domain, "cert": certStatus, "redirect_url": httpURL})
+}
+
+// ensureBlockPageRecord creates an A record in the zone for the block page subdomain
+func (s *Server) ensureBlockPageRecord(prefix, zoneName string) {
+	ip := s.dns.GetBlockPageIP()
+	if ip == "" || ip == "0.0.0.0" {
+		slog.Warn("no block page IP available, skipping zone record", "component", "blockpage")
+		return
+	}
+
+	zone, err := s.db.GetZoneByName(zoneName)
+	if err != nil {
+		slog.Warn("zone not found for block page record", "component", "blockpage", "zone", zoneName, "error", err)
+		return
+	}
+
+	// Check if record already exists
+	records, _ := s.db.ListRecords(zone.ID)
+	for _, r := range records {
+		if r.Name == prefix && r.Type == "A" {
+			// Update if IP changed
+			if r.Value != ip {
+				r.Value = ip
+				s.db.UpdateRecord(&r)
+				slog.Info("updated block page A record", "component", "blockpage", "name", prefix, "zone", zoneName, "ip", ip)
+			}
+			return
+		}
+	}
+
+	// Create new A record
+	s.db.CreateRecord(&db.DNSRecord{
+		ZoneID: zone.ID,
+		Name:   prefix,
+		Type:   "A",
+		Value:  ip,
+		TTL:    300,
+	})
+	slog.Info("created block page A record", "component", "blockpage", "name", prefix, "zone", zoneName, "ip", ip)
 }
 
 func (s *Server) getBlockPageRedirect(c *gin.Context) {
