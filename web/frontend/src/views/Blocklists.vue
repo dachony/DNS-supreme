@@ -160,6 +160,42 @@
       </div>
     </div>
 
+    <!-- TAB: Block Services -->
+    <div v-if="activeTab === 'block-services'" class="tab-content">
+      <div class="bs-layout">
+        <div class="bs-col" v-for="colIdx in 3" :key="colIdx">
+          <div v-for="cat in bsColumned[colIdx - 1]" :key="cat.id" class="bs-category">
+            <div class="bs-cat-header">
+              <div class="bs-cat-left">
+                <span class="bs-cat-icon" :class="'bs-cat-icon-' + cat.id">{{ cat.icon }}</span>
+                <div class="bs-cat-info">
+                  <span class="bs-cat-name">{{ cat.name }}</span>
+                  <span class="bs-cat-count">{{ bsCatEnabledCount(cat) }} / {{ cat.services.length }} blocked</span>
+                </div>
+              </div>
+              <div class="toggle" :class="{ on: bsCatAllEnabled(cat), partial: bsCatPartial(cat), disabled: !isAdmin }"
+                @click="isAdmin && toggleBsCategory(cat)">
+                <div class="toggle-knob"></div>
+              </div>
+            </div>
+            <div class="bs-services">
+              <div v-for="svc in cat.services" :key="svc.id" class="bs-service" :class="{ blocked: svc.enabled }"
+                @click="isAdmin && toggleBsService(svc)" :style="!isAdmin ? 'cursor: default' : ''">
+                <div class="bs-svc-logo" :class="'bs-logo-' + svc.logo">{{ svcInitials(svc.name) }}</div>
+                <div class="bs-svc-info">
+                  <span class="bs-svc-name">{{ svc.name }}</span>
+                  <span class="bs-svc-domains">{{ svc.domains.length }} domains</span>
+                </div>
+                <div class="toggle small" :class="{ on: svc.enabled, disabled: !isAdmin }">
+                  <div class="toggle-knob"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TAB: Community Blocklists -->
     <div v-if="activeTab === 'community'" class="tab-content">
       <div class="community-toolbar">
@@ -438,6 +474,7 @@ const activeTab = ref('services')
 const tabs = [
   { id: 'services', label: 'Services' },
   { id: 'lists', label: 'Active Lists' },
+  { id: 'block-services', label: 'Block Services' },
   { id: 'community', label: 'Community Blocklists' },
   { id: 'premium', label: 'Premium Feeds' },
   { id: 'custom', label: 'Custom Feeds' },
@@ -1104,6 +1141,71 @@ async function addPolicyAllow(p: any) {
 }
 async function removePolicyAllow(p: any, d: string) { delete p.custom_allows[d]; await axios.post('/api/policies', p); loadAll() }
 
+// --- Block Services ---
+const blockServiceCategories = ref<any[]>([])
+
+async function loadBlockServices() {
+  try {
+    const { data } = await axios.get('/api/block-services')
+    blockServiceCategories.value = data || []
+  } catch {}
+}
+
+// Layout: row1=[AI, Social, Video], row2=[Gaming, Messaging, Audio]
+// Order from backend: ai(0), social(1), video(2), audio(3), messaging(4), gaming(5)
+// Column distribution: col0=[ai, gaming], col1=[social, messaging], col2=[video, audio]
+const bsColumned = computed(() => {
+  const cats = blockServiceCategories.value
+  if (cats.length < 6) return [cats.slice(0, 2), cats.slice(2, 4), cats.slice(4, 6)]
+  return [
+    [cats[0], cats[5]], // AI, Gaming
+    [cats[1], cats[4]], // Social, Messaging
+    [cats[2], cats[3]], // Video, Audio
+  ]
+})
+
+const bsTotalServices = computed(() => {
+  return blockServiceCategories.value.reduce((sum: number, cat: any) => sum + cat.services.length, 0)
+})
+const bsTotalBlocked = computed(() => {
+  return blockServiceCategories.value.reduce((sum: number, cat: any) =>
+    sum + cat.services.filter((s: any) => s.enabled).length, 0)
+})
+const bsTotalDomains = computed(() => {
+  let count = 0
+  for (const cat of blockServiceCategories.value) {
+    for (const svc of cat.services) {
+      if (svc.enabled) count += svc.domains.length
+    }
+  }
+  return count
+})
+
+function bsCatEnabledCount(cat: any): number {
+  return cat.services.filter((s: any) => s.enabled).length
+}
+function bsCatAllEnabled(cat: any): boolean {
+  return cat.services.length > 0 && cat.services.every((s: any) => s.enabled)
+}
+function bsCatPartial(cat: any): boolean {
+  const cnt = bsCatEnabledCount(cat)
+  return cnt > 0 && cnt < cat.services.length
+}
+function svcInitials(name: string): string {
+  return name.split(/[\s/]+/).map((w: string) => w[0]).join('').substring(0, 2).toUpperCase()
+}
+
+async function toggleBsCategory(cat: any) {
+  const newState = !bsCatAllEnabled(cat)
+  await axios.put(`/api/block-services/category/${cat.id}`, { enabled: newState })
+  loadBlockServices()
+}
+
+async function toggleBsService(svc: any) {
+  await axios.put(`/api/block-services/service/${svc.id}`, { enabled: !svc.enabled })
+  loadBlockServices()
+}
+
 function closeGeoDropdown(e: MouseEvent) {
   const wrap = (e.target as HTMLElement).closest('.geo-search-wrap')
   if (!wrap) geoDropdownOpen.value = false
@@ -1113,6 +1215,7 @@ onMounted(() => {
   loadNpCategories()
   loadNpSettings()
   loadUpdateInterval()
+  loadBlockServices()
   document.addEventListener('click', closeGeoDropdown)
 })
 </script>
@@ -1688,4 +1791,131 @@ onMounted(() => {
 .blocked-tag { background: rgba(239,68,68,0.1); color: #ef4444; }
 .allow-tag { background: rgba(34,197,94,0.1); color: #22c55e; }
 .tag button { background: none; border: none; color: inherit; cursor: pointer; font-size: 1rem; line-height: 1; }
+
+/* Block Services */
+.bs-layout { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
+.bs-col { display: flex; flex-direction: column; gap: 16px; }
+.bs-category {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden;
+}
+.bs-cat-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: var(--bg-input); border-bottom: 1px solid var(--border);
+}
+.bs-cat-left { display: flex; align-items: center; gap: 10px; }
+.bs-cat-icon {
+  width: 34px; height: 34px; border-radius: 8px; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 0.68rem; font-weight: 800; letter-spacing: 0.5px;
+}
+.bs-cat-icon-ai { background: rgba(139,92,246,0.15); color: #8b5cf6; }
+.bs-cat-icon-social { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.bs-cat-icon-video { background: rgba(239,68,68,0.15); color: #ef4444; }
+.bs-cat-icon-audio { background: rgba(34,197,94,0.15); color: #22c55e; }
+.bs-cat-icon-messaging { background: rgba(56,189,248,0.15); color: #38bdf8; }
+.bs-cat-icon-gaming { background: rgba(249,115,22,0.15); color: #f97316; }
+.bs-cat-name { color: var(--text-primary); font-weight: 600; font-size: 0.95rem; display: block; }
+.bs-cat-count { color: var(--text-muted); font-size: 0.75rem; }
+.bs-cat-info { display: flex; flex-direction: column; gap: 1px; }
+
+.toggle.partial { background: #f59e0b; }
+.toggle.small { width: 34px; height: 18px; border-radius: 9px; }
+.toggle.small .toggle-knob { width: 14px; height: 14px; }
+.toggle.small.on .toggle-knob { transform: translateX(16px); }
+
+.bs-services {
+  display: flex; flex-direction: column;
+}
+.bs-service {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  border-bottom: 1px solid var(--border); transition: all 0.15s; cursor: pointer;
+}
+.bs-service:last-child { border-bottom: none; }
+.bs-service:hover { background: var(--bg-hover); }
+.bs-service.blocked { background: rgba(239,68,68,0.04); }
+
+.bs-svc-logo {
+  width: 30px; height: 30px; border-radius: 7px; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 0.6rem; font-weight: 700; background: var(--bg-hover); color: var(--text-secondary);
+  flex-shrink: 0;
+}
+/* Service logo colors */
+.bs-logo-chatgpt { background: rgba(16,163,127,0.15); color: #10a37f; }
+.bs-logo-claude { background: rgba(204,133,75,0.15); color: #cc854b; }
+.bs-logo-gemini { background: rgba(66,133,244,0.15); color: #4285f4; }
+.bs-logo-deepseek { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.bs-logo-copilot { background: rgba(0,120,212,0.15); color: #0078d4; }
+.bs-logo-perplexity { background: rgba(32,175,229,0.15); color: #20afe5; }
+.bs-logo-midjourney { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+.bs-logo-grok { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+.bs-logo-huggingface { background: rgba(255,213,79,0.15); color: #ffd54f; }
+
+.bs-logo-facebook { background: rgba(24,119,242,0.15); color: #1877f2; }
+.bs-logo-instagram { background: rgba(225,48,108,0.15); color: #e1306c; }
+.bs-logo-tiktok { background: rgba(255,0,80,0.15); color: #ff0050; }
+.bs-logo-twitter { background: rgba(29,161,242,0.15); color: #1da1f2; }
+.bs-logo-snapchat { background: rgba(255,252,0,0.15); color: #fffc00; }
+.bs-logo-linkedin { background: rgba(0,119,181,0.15); color: #0077b5; }
+.bs-logo-reddit { background: rgba(255,69,0,0.15); color: #ff4500; }
+.bs-logo-pinterest { background: rgba(189,8,28,0.15); color: #bd081c; }
+.bs-logo-threads { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+
+.bs-logo-youtube { background: rgba(255,0,0,0.15); color: #ff0000; }
+.bs-logo-netflix { background: rgba(229,9,20,0.15); color: #e50914; }
+.bs-logo-twitch { background: rgba(145,70,255,0.15); color: #9146ff; }
+.bs-logo-disneyplus { background: rgba(19,60,131,0.15); color: #133c83; }
+.bs-logo-hbomax { background: rgba(101,52,183,0.15); color: #6534b7; }
+.bs-logo-primevideo { background: rgba(0,168,225,0.15); color: #00a8e1; }
+
+.bs-logo-spotify { background: rgba(30,215,96,0.15); color: #1ed760; }
+.bs-logo-applemusic { background: rgba(252,60,68,0.15); color: #fc3c44; }
+.bs-logo-deezer { background: rgba(160,54,222,0.15); color: #a036de; }
+.bs-logo-soundcloud { background: rgba(255,85,0,0.15); color: #ff5500; }
+.bs-logo-tidal { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+
+.bs-logo-whatsapp { background: rgba(37,211,102,0.15); color: #25d366; }
+.bs-logo-telegram { background: rgba(38,166,224,0.15); color: #26a6e0; }
+.bs-logo-discord { background: rgba(88,101,242,0.15); color: #5865f2; }
+.bs-logo-signal { background: rgba(58,118,255,0.15); color: #3a76ff; }
+.bs-logo-viber { background: rgba(121,60,173,0.15); color: #793cad; }
+
+.bs-logo-steam { background: rgba(27,40,56,0.2); color: #c7d5e0; }
+.bs-logo-epicgames { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+.bs-logo-roblox { background: rgba(226,35,26,0.15); color: #e2231a; }
+.bs-logo-xboxlive { background: rgba(16,124,16,0.15); color: #107c10; }
+.bs-logo-playstation { background: rgba(0,55,145,0.15); color: #003791; }
+
+.bs-svc-info { flex: 1; min-width: 0; }
+.bs-svc-name { color: var(--text-primary); font-weight: 500; font-size: 0.85rem; display: block; }
+.bs-svc-domains { color: var(--text-muted); font-size: 0.7rem; }
+.bs-cat-name { font-size: 0.9rem; }
+
+/* How it Works panel */
+.bs-how-it-works {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 18px;
+}
+.bs-how-it-works h4 { color: var(--text-primary); font-size: 0.95rem; margin-bottom: 14px; }
+.bs-hiw-steps { display: flex; flex-direction: column; gap: 12px; }
+.bs-hiw-step { display: flex; gap: 10px; align-items: flex-start; }
+.bs-hiw-num {
+  width: 24px; height: 24px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; flex-shrink: 0;
+  font-size: 0.7rem; font-weight: 700; background: var(--accent); color: #fff;
+}
+.bs-hiw-text { display: flex; flex-direction: column; gap: 1px; }
+.bs-hiw-title { color: var(--text-primary); font-weight: 600; font-size: 0.82rem; }
+.bs-hiw-desc { color: var(--text-muted); font-size: 0.74rem; line-height: 1.4; }
+.bs-hiw-stats {
+  display: flex; gap: 12px; margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.bs-hiw-stat {
+  flex: 1; text-align: center; padding: 10px 0;
+  background: var(--bg-input); border-radius: 8px;
+}
+.bs-hiw-stat-num { display: block; color: var(--accent); font-size: 1.2rem; font-weight: 700; }
+.bs-hiw-stat-label { color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
 </style>

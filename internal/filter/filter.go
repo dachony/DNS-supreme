@@ -57,6 +57,7 @@ type Engine struct {
 	disabledCategories map[Category]bool
 	geoBlockedCountries map[string]bool       // country code -> blocked
 	geoLookup          GeoLookupFunc
+	serviceBlocker     *ServiceBlocker
 	mode               string                // "blocklist" or "allowlist"
 	mu                 sync.RWMutex
 	filterCache        map[string]filterCacheEntry
@@ -74,9 +75,15 @@ func NewEngine() *Engine {
 		lists:              make([]BlockList, 0),
 		disabledCategories: make(map[Category]bool),
 		geoBlockedCountries: make(map[string]bool),
+		serviceBlocker:     NewServiceBlocker(),
 		mode:               "blocklist",
 		filterCache:        make(map[string]filterCacheEntry),
 	}
+}
+
+// ServiceBlocker returns the service blocker instance
+func (e *Engine) ServiceBlocker() *ServiceBlocker {
+	return e.serviceBlocker
 }
 
 func (e *Engine) GetMode() string {
@@ -144,6 +151,13 @@ func (e *Engine) Check(domain string, qtype uint16) (blocked bool, rule string) 
 		return false, ""
 	}
 
+	// Service blocking (check before blocklists)
+	if e.serviceBlocker != nil {
+		if svcBlocked, svcRule := e.serviceBlocker.Check(domain); svcBlocked {
+			return true, svcRule
+		}
+	}
+
 	// Custom blocklist
 	if reason, ok := e.customList[domain]; ok {
 		return true, "custom: " + reason
@@ -168,6 +182,11 @@ func (e *Engine) clearFilterCache() {
 	e.filterCacheMu.Lock()
 	e.filterCache = make(map[string]filterCacheEntry)
 	e.filterCacheMu.Unlock()
+}
+
+// ClearFilterCache clears the filter cache (public)
+func (e *Engine) ClearFilterCache() {
+	e.clearFilterCache()
 }
 
 // CheckGeo checks if a client IP should be blocked by geo policy

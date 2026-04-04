@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dachony/dns-supreme/internal/certs"
@@ -341,8 +342,34 @@ func (s *Server) requestACMECert(c *gin.Context) {
 			s.db.SetSetting("acme_status_"+req.Domain, `{"status":"failed","domain":"`+req.Domain+`","error":"`+errMsg+`"}`)
 		} else {
 			s.db.SetSetting("acme_status_"+req.Domain, `{"status":"issued","domain":"`+req.Domain+`"}`)
+			// If this cert is for the block page domain, load it into block page server
+			s.loadBlockPageCertIfMatch(req.Domain)
 		}
 	}()
 
 	c.JSON(http.StatusOK, gin.H{"status": "requesting", "domain": req.Domain})
+}
+
+// loadBlockPageCertIfMatch checks if a cert exists for the block page domain and loads it
+func (s *Server) loadBlockPageCertIfMatch(domain string) {
+	bpDomain := s.dns.GetBlockPageDomain()
+	if bpDomain == "" || domain != bpDomain {
+		return
+	}
+	certPath := "/app/certs/" + domain + ".crt"
+	keyPath := "/app/certs/" + domain + ".key"
+	if s.blockPage != nil {
+		if err := s.blockPage.SetBlockPageCert(certPath, keyPath); err != nil {
+			slog.Error("failed to load block page cert", "component", "acme", "domain", domain, "error", err)
+		} else {
+			// Set redirect URL to HTTPS if not already set
+			redirectURL := s.blockPage.GetRedirectURL()
+			if redirectURL == "" || !strings.HasPrefix(redirectURL, "https://") {
+				httpsURL := "https://" + domain
+				s.blockPage.SetRedirectURL(httpsURL)
+				s.db.SetSetting("block_page_redirect_url", httpsURL)
+				slog.Info("auto-set block page redirect to HTTPS", "component", "acme", "url", httpsURL)
+			}
+		}
+	}
 }

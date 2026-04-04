@@ -58,15 +58,17 @@ type BlockInfo struct {
 }
 
 type Server struct {
-	listenAddr string
-	httpPort   int
-	httpsPort  int
-	tlsConfig  *tls.Config
-	tmpl       *template.Template
-	customHTML string
-	blockMap   map[string]string
-	dohHandler http.Handler
-	mu         sync.RWMutex
+	listenAddr   string
+	httpPort     int
+	httpsPort    int
+	tlsConfig    *tls.Config
+	blockPageCert *tls.Certificate // dedicated cert for block page domain
+	tmpl         *template.Template
+	customHTML   string
+	blockMap     map[string]string
+	redirectURL  string // base URL to redirect blocked requests to (e.g. "http://192.168.1.1" or "http://block.example.com")
+	dohHandler   http.Handler
+	mu           sync.RWMutex
 }
 
 func NewServer(listenAddr string, httpPort, httpsPort int, tlsCfg *tls.Config) *Server {
@@ -79,6 +81,22 @@ func NewServer(listenAddr string, httpPort, httpsPort int, tlsCfg *tls.Config) *
 		tmpl:       tmpl,
 		blockMap:   make(map[string]string),
 	}
+}
+
+// SetRedirectURL sets the block page redirect URL (IP or domain).
+// When set, blocked requests are redirected to this URL instead of serving inline.
+func (s *Server) SetRedirectURL(url string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.redirectURL = strings.TrimRight(url, "/")
+	slog.Info("block page redirect URL set", "component", "blockpage", "url", url)
+}
+
+// GetRedirectURL returns the current redirect URL
+func (s *Server) GetRedirectURL() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.redirectURL
 }
 
 func (s *Server) SetCustomTemplate(html string) error {
@@ -112,6 +130,19 @@ func (s *Server) ReloadTLS(tlsCfg *tls.Config) {
 	s.tlsConfig = tlsCfg
 }
 
+// SetBlockPageCert loads a dedicated TLS certificate for the block page domain
+func (s *Server) SetBlockPageCert(certFile, keyFile string) error {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("load block page cert: %w", err)
+	}
+	s.mu.Lock()
+	s.blockPageCert = &cert
+	s.mu.Unlock()
+	slog.Info("block page certificate loaded", "component", "blockpage", "cert", certFile)
+	return nil
+}
+
 func (s *Server) SetDoHHandler(handler http.Handler) {
 	s.dohHandler = handler
 }
@@ -141,8 +172,13 @@ func (s *Server) Start() error {
 			MinVersion: tls.VersionTLS12,
 			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 				s.mu.RLock()
+				bpCert := s.blockPageCert
 				cfg := s.tlsConfig
 				s.mu.RUnlock()
+				// Prefer dedicated block page cert if available
+				if bpCert != nil {
+					return bpCert, nil
+				}
 				if cfg == nil || len(cfg.Certificates) == 0 {
 					return nil, fmt.Errorf("no certificate configured")
 				}
@@ -166,6 +202,25 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) handleBlock(w http.ResponseWriter, r *http.Request) {
+	// If path is /blocked, render block page from query params
+	if r.URL.Path == "/blocked" {
+		domain := r.URL.Query().Get("domain")
+		reason := r.URL.Query().Get("reason")
+		if domain == "" {
+			domain = "unknown"
+		}
+		if reason == "" {
+			reason = "Domain blocked by DNS filtering policy"
+		}
+		s.mu.RLock()
+		tmpl := s.tmpl
+		s.mu.RUnlock()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		tmpl.Execute(w, BlockInfo{Domain: domain, Reason: reason})
+		return
+	}
+
 	domain := r.Host
 	if host, _, err := net.SplitHostPort(domain); err == nil {
 		domain = host
@@ -174,6 +229,7 @@ func (s *Server) handleBlock(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.RLock()
 	reason, ok := s.blockMap[domain]
+	redirectURL := s.redirectURL
 	tmpl := s.tmpl
 	s.mu.RUnlock()
 
@@ -181,6 +237,25 @@ func (s *Server) handleBlock(w http.ResponseWriter, r *http.Request) {
 		reason = "Domain blocked by DNS filtering policy"
 	}
 
+	// If redirect URL is set and the request host is NOT the block page itself, redirect
+	if redirectURL != "" {
+		blockHost := strings.TrimPrefix(redirectURL, "https://")
+		blockHost = strings.TrimPrefix(blockHost, "http://")
+		blockHost = strings.Split(blockHost, "/")[0]
+		blockHost = strings.Split(blockHost, ":")[0]
+
+		if domain != blockHost {
+			target := fmt.Sprintf("%s/blocked?domain=%s&reason=%s",
+				redirectURL,
+				template.URLQueryEscaper(domain),
+				template.URLQueryEscaper(reason),
+			)
+			http.Redirect(w, r, target, http.StatusFound)
+			return
+		}
+	}
+
+	// Fallback: render block page inline (when no redirect URL or request is to block page itself)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
 	tmpl.Execute(w, BlockInfo{Domain: domain, Reason: reason})

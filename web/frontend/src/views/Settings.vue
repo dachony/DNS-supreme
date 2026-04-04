@@ -720,21 +720,58 @@
 
     <!-- TAB: Block Page -->
     <div v-if="activeTab === 'blockpage'" class="tab-content">
-      <!-- Block Page Domain -->
-      <div class="subsection" style="margin-bottom:20px">
-        <h4>Block Page Domain</h4>
-        <p class="section-desc">Set a domain name that resolves to your block page. Blocked sites will show this domain in the browser address bar instead of a raw IP.</p>
-        <div class="settings-grid" style="margin-bottom:8px">
-          <div class="field">
-            <label>Domain Name</label>
-            <input v-model="bpDomain" placeholder="block.mynetwork.com" />
+      <!-- Block Page Domain — split layout -->
+      <div class="bp-domain-split">
+        <div class="bp-domain-left">
+          <h4>Block Page Domain</h4>
+          <p class="section-desc">Configure a domain for your block page. Blocked sites will redirect here, with a valid TLS certificate.</p>
+          <div class="bp-domain-row">
+            <div class="field" style="flex:0 0 160px">
+              <label>Subdomain</label>
+              <input v-model="bpPrefix" placeholder="denied" />
+            </div>
+            <span class="bp-domain-dot">.</span>
+            <div class="field" style="flex:1">
+              <label>Zone</label>
+              <select v-model="bpZone">
+                <option value="" disabled>Select a zone...</option>
+                <option v-for="z in bpZones" :key="z" :value="z">{{ z }}</option>
+              </select>
+            </div>
           </div>
+          <div class="bp-domain-preview" v-if="bpPrefix && bpZone">
+            <span class="bp-preview-label">Block page URL:</span>
+            <code class="bp-preview-domain">{{ bpPrefix }}.{{ bpZone }}</code>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <button @click="setupBpDomain" :disabled="!bpPrefix || !bpZone || bpSetupLoading" class="btn-primary">
+              {{ bpSetupLoading ? 'Setting up...' : 'Setup Block Page' }}
+            </button>
+            <button v-if="bpDomain" @click="clearBpDomain" class="btn-secondary">Clear</button>
+          </div>
+          <p v-if="bpDomainMsg" :class="bpDomainMsg.startsWith('Failed') ? 'msg-error' : 'msg-success'" style="margin-top:8px">{{ bpDomainMsg }}</p>
         </div>
-        <button @click="saveBlockPageDomain" class="btn-primary">Save</button>
-        <p v-if="bpDomainMsg" class="msg-success" style="margin-top:8px">{{ bpDomainMsg }}</p>
-        <p class="section-desc" style="font-size:0.72rem;margin-top:6px" v-if="bpDomain">
-          DNS Supreme will automatically resolve <code style="color:var(--accent)">{{ bpDomain }}</code> to your server's block page IP. No zone configuration needed.
-        </p>
+        <div class="bp-domain-right">
+          <h4>Status</h4>
+          <div v-if="bpDomain" class="bp-domain-status">
+            <div class="bp-status-row">
+              <span class="bp-status-label">Domain</span>
+              <code>{{ bpDomain }}</code>
+            </div>
+            <div class="bp-status-row">
+              <span class="bp-status-label">Redirect</span>
+              <code>{{ bpRedirectURL || 'Not set' }}</code>
+            </div>
+            <div class="bp-status-row">
+              <span class="bp-status-label">Certificate</span>
+              <span :class="bpCertStatus === 'issued' ? 'bp-cert-ok' : bpCertStatus === 'requesting' ? 'bp-cert-pending' : 'bp-cert-none'">
+                {{ bpCertStatus === 'issued' ? 'Valid' : bpCertStatus === 'requesting' ? 'Requesting...' : bpCertStatus === 'failed' ? 'Failed' : 'None' }}
+              </span>
+              <button v-if="bpCertStatus === 'failed' || bpCertStatus === 'none'" @click="setupBpDomain" class="btn-sm">Retry</button>
+            </div>
+          </div>
+          <div v-else class="bp-status-empty">No block page domain configured</div>
+        </div>
       </div>
 
       <div class="bp-split">
@@ -772,8 +809,8 @@
               <textarea v-model="bpMessage" rows="3" placeholder="Access to this page has been blocked by your network administrator." @input="updateBpFromVisual"></textarea>
             </div>
             <div class="field">
-              <label>Description (optional)</label>
-              <textarea v-model="bpDescription" rows="2" placeholder="Additional info, e.g. contact admin at support@company.com for help" @input="updateBpFromVisual"></textarea>
+              <label>Optional Message</label>
+              <textarea v-model="bpDescription" rows="2" placeholder="Additional message shown below the main message" @input="updateBpFromVisual"></textarea>
             </div>
             <div class="field">
               <label>Footer (optional)</label>
@@ -1651,6 +1688,13 @@ const blockPageHTML = ref('')
 const bpMsg = ref('')
 const bpDomain = ref('')
 const bpDomainMsg = ref('')
+const bpRedirectURL = ref('')
+const bpRedirectMsg = ref('')
+const bpPrefix = ref('denied')
+const bpZone = ref('')
+const bpZones = ref<string[]>([])
+const bpSetupLoading = ref(false)
+const bpCertStatus = ref('none') // none, requesting, issued, failed
 const bpMode = ref('visual')
 const bpLogo = ref('')
 const bpHeading = ref('Access Blocked')
@@ -1677,20 +1721,23 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
 .logo{margin-bottom:16px}
 .icon{font-size:48px;margin-bottom:16px;color:${bpColor.value}}
 h1{font-size:1.5rem;color:#f1f5f9;margin-bottom:12px}
-.message{color:#94a3b8;font-size:0.95rem;line-height:1.6;margin-bottom:20px}
+.message{color:#94a3b8;font-size:0.95rem;line-height:1.6;margin-bottom:0}
+.opt-message{color:#94a3b8;font-size:0.95rem;line-height:1.6;margin-top:12px}
+.msg-block{margin-bottom:20px}
 .domain{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 16px;font-family:monospace;font-size:0.9rem;color:${bpColor.value};margin-bottom:8px;word-break:break-all}
 .reason{color:#64748b;font-size:0.8rem;margin-bottom:20px}
-.description{color:#94a3b8;font-size:0.85rem;line-height:1.5;margin-bottom:20px;padding:12px;background:#0f172a;border-radius:8px}
 .footer{color:#475569;font-size:0.75rem;padding-top:16px;border-top:1px solid #334155}
 </style></head><body>
 <div class="card">
   <div class="logo">${logo}</div>
   <div class="icon">&#x26D4;</div>
   <h1>${bpHeading.value || 'Access Blocked'}</h1>
-  <p class="message">${bpMessage.value || ''}</p>
+  <div class="msg-block">
+    <p class="message">${bpMessage.value || ''}</p>
+    ${bpDescription.value ? `<p class="opt-message">${bpDescription.value}</p>` : ''}
+  </div>
   <div class="domain">{{.Domain}}</div>
   <p class="reason">Reason: {{.Reason}}</p>
-  ${bpDescription.value ? `<div class="description">${bpDescription.value}</div>` : ''}
   ${bpFooter.value ? `<div class="footer">${bpFooter.value}</div>` : ''}
 </div>
 </body></html>`
@@ -1750,12 +1797,13 @@ const logMsg = ref('')
 
 // --- Load ---
 async function loadAll() {
-  const [fw, dk, certs, bp, bpd, ss, hn, pd, cl, ls, lr] = await Promise.all([
+  const [fw, dk, certs, bp, bpd, bpr, ss, hn, pd, cl, ls, lr] = await Promise.all([
     axios.get('/api/settings/forwarders'),
     axios.get('/api/dnssec'),
     axios.get('/api/certs'),
     axios.get('/api/settings/blockpage'),
     axios.get('/api/settings/blockpage/domain'),
+    axios.get('/api/settings/blockpage/redirect'),
     axios.get('/api/settings/server'),
     axios.get('/api/settings/hostname'),
     axios.get('/api/settings/primary-domain'),
@@ -1768,6 +1816,7 @@ async function loadAll() {
   certInfo.value = certs.data
   blockPageHTML.value = bp.data.html || ''
   bpDomain.value = bpd.data.domain || ''
+  bpRedirectURL.value = bpr.data.redirect_url || ''
   if (bp.data.settings) {
     const s = bp.data.settings
     if (s.logo) bpLogo.value = s.logo
@@ -2010,6 +2059,87 @@ function formatDate(d: string) {
 }
 
 // --- Block Page ---
+async function loadBpZones() {
+  try {
+    const { data } = await axios.get('/api/zones')
+    bpZones.value = (data || []).map((z: any) => z.name)
+  } catch {}
+}
+
+async function setupBpDomain() {
+  if (!bpPrefix.value || !bpZone.value) return
+  bpSetupLoading.value = true
+  bpDomainMsg.value = ''
+  try {
+    const { data } = await axios.post('/api/settings/blockpage/setup-domain', {
+      prefix: bpPrefix.value,
+      zone: bpZone.value,
+    })
+    bpDomain.value = data.domain
+    bpRedirectURL.value = data.redirect_url
+    if (data.cert === 'loaded') {
+      bpCertStatus.value = 'issued'
+      bpDomainMsg.value = 'Block page configured with HTTPS certificate'
+    } else if (data.cert === 'requesting') {
+      bpCertStatus.value = 'requesting'
+      bpDomainMsg.value = 'Domain configured, requesting TLS certificate...'
+      pollBpCertStatus(data.domain)
+    } else {
+      bpCertStatus.value = 'none'
+      bpDomainMsg.value = 'Domain configured (no ACME email set — configure in Certificates tab for HTTPS)'
+    }
+  } catch (e: any) {
+    bpDomainMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+  } finally {
+    bpSetupLoading.value = false
+  }
+}
+
+async function clearBpDomain() {
+  try {
+    await axios.put('/api/settings/blockpage/domain', { domain: '' })
+    await axios.put('/api/settings/blockpage/redirect', { redirect_url: '' })
+    bpDomain.value = ''
+    bpRedirectURL.value = ''
+    bpPrefix.value = 'denied'
+    bpZone.value = ''
+    bpCertStatus.value = 'none'
+    bpDomainMsg.value = 'Block page domain cleared'
+    setTimeout(() => bpDomainMsg.value = '', 3000)
+  } catch {}
+}
+
+async function pollBpCertStatus(domain: string) {
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000))
+    try {
+      const { data } = await axios.get(`/api/acme/status/${domain}`)
+      if (data.status === 'issued') {
+        bpCertStatus.value = 'issued'
+        bpDomainMsg.value = 'TLS certificate issued! Block page now uses HTTPS.'
+        // Reload to get updated redirect URL
+        const { data: redir } = await axios.get('/api/settings/blockpage/redirect')
+        bpRedirectURL.value = redir.redirect_url || ''
+        return
+      } else if (data.status === 'failed') {
+        bpCertStatus.value = 'failed'
+        bpDomainMsg.value = 'Certificate request failed: ' + (data.error || 'unknown error')
+        return
+      }
+    } catch { break }
+  }
+}
+
+async function checkBpCertStatus() {
+  if (!bpDomain.value) return
+  try {
+    const { data } = await axios.get(`/api/acme/status/${bpDomain.value}`)
+    bpCertStatus.value = data.status || 'none'
+  } catch {
+    bpCertStatus.value = 'none'
+  }
+}
+
 async function saveBlockPageDomain() {
   bpDomainMsg.value = ''
   try {
@@ -2018,6 +2148,17 @@ async function saveBlockPageDomain() {
     setTimeout(() => bpDomainMsg.value = '', 3000)
   } catch (e: any) {
     bpDomainMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
+  }
+}
+
+async function saveBlockPageRedirect() {
+  bpRedirectMsg.value = ''
+  try {
+    await axios.put('/api/settings/blockpage/redirect', { redirect_url: bpRedirectURL.value })
+    bpRedirectMsg.value = bpRedirectURL.value ? 'Redirect URL saved' : 'Redirect URL cleared'
+    setTimeout(() => bpRedirectMsg.value = '', 3000)
+  } catch (e: any) {
+    bpRedirectMsg.value = 'Failed: ' + (e.response?.data?.error || e.message)
   }
 }
 
@@ -2080,7 +2221,19 @@ async function handleRestoreFile(e: Event) {
   input.value = ''
 }
 
-onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings(); loadAcmeConfig() })
+onMounted(async () => {
+  await loadAll()
+  loadUsers(); loadMe(); loadCertZones(); loadFail2Ban(); loadMailSettings(); loadAcmeConfig()
+  loadBpZones()
+  // Parse existing bpDomain into prefix + zone
+  if (bpDomain.value && bpDomain.value.includes('.')) {
+    const dot = bpDomain.value.indexOf('.')
+    bpPrefix.value = bpDomain.value.substring(0, dot)
+    const zone = bpDomain.value.substring(dot + 1)
+    bpZone.value = zone
+  }
+  checkBpCertStatus()
+})
 </script>
 
 <style scoped>
@@ -2636,6 +2789,49 @@ onMounted(() => { loadAll(); loadUsers(); loadMe(); loadCertZones(); loadFail2Ba
   border-radius: 8px;
 }
 .hiw-tip code { color: var(--accent); background: var(--bg); padding: 1px 4px; border-radius: 3px; }
+
+/* Block Page Domain Setup — split layout */
+.bp-domain-split {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+  margin-bottom: 20px; align-items: start;
+}
+.bp-domain-left, .bp-domain-right {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 18px;
+}
+.bp-domain-left h4, .bp-domain-right h4 {
+  color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 8px;
+}
+.bp-domain-row {
+  display: flex; align-items: flex-end; gap: 0; margin-bottom: 8px;
+}
+.bp-domain-dot {
+  color: var(--text-muted); font-size: 1.4rem; font-weight: 700;
+  padding: 0 6px; margin-bottom: 8px; line-height: 40px;
+}
+.bp-domain-preview {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+}
+.bp-preview-label { color: var(--text-muted); font-size: 0.8rem; }
+.bp-preview-domain { color: var(--accent); font-size: 0.9rem; }
+.bp-domain-status {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.bp-status-row {
+  display: flex; align-items: center; gap: 8px; font-size: 0.85rem;
+  padding: 8px 12px; background: var(--bg-input); border-radius: 8px;
+}
+.bp-status-label { color: var(--text-muted); min-width: 80px; font-weight: 500; }
+.bp-status-row code { color: var(--accent); font-size: 0.82rem; word-break: break-all; }
+.bp-cert-ok { color: #22c55e; font-weight: 600; }
+.bp-cert-pending { color: #f59e0b; font-weight: 600; }
+.bp-cert-none { color: var(--text-dim); }
+.bp-status-empty { color: var(--text-dim); font-size: 0.85rem; padding: 20px 0; text-align: center; }
+.btn-sm {
+  padding: 2px 10px; font-size: 0.72rem; background: var(--accent); color: #fff;
+  border: none; border-radius: 4px; cursor: pointer; margin-left: auto;
+}
+.msg-error { color: #ef4444; font-size: 0.82rem; }
 
 @media (max-width: 768px) {
   .identity-split { grid-template-columns: 1fr; }

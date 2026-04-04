@@ -329,4 +329,12 @@ func loadPersistedFilterSettings(database *db.Database, engine *filter.Engine) {
 			slog.Info("restored allowlist entries", "component", "persistence", "count", len(list))
 		}
 	}
+
+	// Blocked services
+	if data := database.GetSetting("blocked_services"); data != "" {
+		var ids []string
+		if json.Unmarshal([]byte(data), &ids) == nil && len(ids) > 0 {
+			engine.ServiceBlocker().RestoreEnabled(ids)
+		}
+	}
 }

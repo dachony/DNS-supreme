@@ -174,6 +174,9 @@ func (s *Server) setupRoutes() {
 		protected.GET("/categories", s.getCategories)
 		protected.GET("/geo-blocked", s.getGeoBlocked)
 
+		// Block services (read)
+		protected.GET("/block-services", s.getBlockServices)
+
 		// Network protection (read)
 		protected.GET("/network-protection", s.getNetProtectCategories)
 		protected.GET("/network-protection/:id/entries", s.getNetProtectEntries)
@@ -190,6 +193,7 @@ func (s *Server) setupRoutes() {
 		// Settings (read)
 		protected.GET("/settings/blockpage", s.getBlockPageTemplate)
 		protected.GET("/settings/blockpage/domain", s.getBlockPageDomain)
+		protected.GET("/settings/blockpage/redirect", s.getBlockPageRedirect)
 		protected.GET("/settings/forwarders", s.getForwarders)
 		protected.GET("/settings/server", s.getServerSettings)
 		protected.GET("/settings/hostname", s.getHostname)
@@ -235,6 +239,10 @@ func (s *Server) setupRoutes() {
 			// Geo-blocking (write)
 			admin.PUT("/geo-blocked", s.setGeoBlocked)
 
+			// Block services (write)
+			admin.PUT("/block-services/service/:id", s.toggleBlockService)
+			admin.PUT("/block-services/category/:id", s.toggleBlockServiceCategory)
+
 			// Network protection (write)
 			admin.PUT("/network-protection/:id", s.setNetProtectCategory)
 			admin.PUT("/network-protection/geo", s.setNetProtectGeo)
@@ -258,6 +266,8 @@ func (s *Server) setupRoutes() {
 			admin.PUT("/settings/blockpage", s.setBlockPageTemplate)
 			admin.POST("/settings/blockpage/upload-logo", s.uploadBlockPageLogo)
 		admin.PUT("/settings/blockpage/domain", s.setBlockPageDomain)
+			admin.POST("/settings/blockpage/setup-domain", s.setupBlockPageDomain)
+			admin.PUT("/settings/blockpage/redirect", s.setBlockPageRedirect)
 			admin.PUT("/settings/forwarders", s.setForwarders)
 			admin.PUT("/settings/server", s.updateServerSettings)
 			admin.PUT("/settings/hostname", s.setHostname)
@@ -1223,4 +1233,50 @@ func (s *Server) setGeoBlocked(c *gin.Context) {
 	}
 	s.filter.SetGeoBlocked(req.Countries)
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "blocked_countries": len(req.Countries)})
+}
+
+// --- Block Services ---
+
+func (s *Server) getBlockServices(c *gin.Context) {
+	sb := s.filter.ServiceBlocker()
+	c.JSON(http.StatusOK, sb.GetCategories())
+}
+
+func (s *Server) toggleBlockService(c *gin.Context) {
+	id := c.Param("id")
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	sb := s.filter.ServiceBlocker()
+	sb.SetServiceEnabled(id, req.Enabled)
+	s.filter.ClearFilterCache()
+	s.persistBlockServices()
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) toggleBlockServiceCategory(c *gin.Context) {
+	id := c.Param("id")
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	sb := s.filter.ServiceBlocker()
+	sb.SetCategoryEnabled(id, req.Enabled)
+	s.filter.ClearFilterCache()
+	s.persistBlockServices()
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (s *Server) persistBlockServices() {
+	sb := s.filter.ServiceBlocker()
+	ids := sb.GetEnabledServiceIDs()
+	data, _ := json.Marshal(ids)
+	s.db.SetSetting("blocked_services", string(data))
 }
