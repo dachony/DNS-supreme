@@ -373,7 +373,7 @@ func (e *NetProtectEngine) loadCategory(id string) {
 
 // fetchIPList downloads and parses an IP/CIDR list from a URL
 func fetchIPList(url string) (map[string]bool, []*net.IPNet, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newHTTPClient(30 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, nil, err

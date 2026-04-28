@@ -97,7 +97,7 @@ func downloadDBIP(destPath string) error {
 		return err
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := newHTTPClient(60 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)

@@ -432,7 +432,7 @@ func (e *Engine) LoadFromFile(path, listName string, category Category) (int, er
 }
 
 func (e *Engine) loadFromURL(url, listName string, category Category) (int, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newHTTPClient(30 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		return 0, err
