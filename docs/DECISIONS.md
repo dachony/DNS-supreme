@@ -74,7 +74,31 @@ Ovde beležimo sve ključne arhitekturne i dizajnerske odluke.
 
 ---
 
-## Otvorena pitanja
-- Programski jezik — TBD (predlog: Go)
-- Frontend framework — TBD
-- MVP scope / faziranje — TBD
+---
+
+## 2026-04-04 — v2.0 release, Management HTTPS, ACME
+
+### Odlučeno:
+- **Management HTTPS** — port 53443, koristi `http.Server` direktno (ne Gin `RunTLS`) jer Gin ne može da pokrene dva listenera istovremeno
+- **ACME DNS-01** — DNS server sada servira `_acme-challenge` TXT zapise iz baze; polling TXT propagacije svakih 10s (max 2 min)
+- **Block page cert** — ne prepisuje `server.crt` ako već postoji; oba sertifikata koegzistiraju u `/app/certs/`
+- **Docker restart** — koristi `SIGTERM` (ne `SIGHUP`) za potpuni restart kontejnera
+- **certdata volume** — dodat u docker-compose da sertifikati prežive redeployment
+- **Block Services** — novi tab u DNS Filtering za blokiranje servisa po kategorijama (ChatGPT, TikTok, itd.)
+
+---
+
+## 2026-04-28 — Docker DNS workaround, query log verifikacija
+
+### Problem:
+Docker-ov interni DNS resolver (`127.0.0.11:53`) pada sa timeout-om kada kontejner mapira port 53 na host. Ovo blokira sve HTTP fetch-eve iz aplikacije (blockliste, network protection feedovi, GeoIP download).
+
+### Odlučeno:
+- **Custom HTTP klijent** (`internal/filter/httpclient.go`) — `net.Resolver` koji direktno dials `8.8.8.8:53`, zaobilazi sistem resolver
+- Svi eksterni HTTP pozivi u filter paketu (`filter.go`, `netprotect.go`, `geoip.go`) koriste `newHTTPClient()` umesto `&http.Client{}`
+- Nije potrebno menjati `docker-compose.yml` niti DNS konfiguraciju hosta
+
+### Deployment workflow:
+- Remote host: `192.168.222.2`, user: `danijel`, app u `/home/danijel/DNS-supreme/`
+- Host **nema `.git`** — deploy se radi ručno: `scp` izmenjenih fajlova + `sudo docker compose build && up -d`
+- `update.sh` postoji ali zahteva git repo — nije primenjivo na ovom hostu

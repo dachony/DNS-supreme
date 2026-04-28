@@ -1,4 +1,4 @@
-# DNS Supreme v1.0.0 — Arhitektura
+# DNS Supreme v2.0.0 — Arhitektura
 
 ## Pregled
 
@@ -59,6 +59,7 @@
 - `policies.go` — per-device policy override (disabled categories, custom blocks/allows)
 - `netprotect.go` — IP-based threat feeds (Tor, Spamhaus, Botnet, Malicious, URLhaus), auto-refresh
 - `geoip.go` — MMDB reader, auto-download DB-IP free database
+- `httpclient.go` — custom HTTP klijent sa hardkodiranim DNS resolverom (8.8.8.8:53); zaobilazi Docker-ov interni resolver (127.0.0.11) koji pada kada kontejner mapira port 53
 
 ### API Server (`internal/api/`)
 - `api.go` — Gin router, auth middleware, login sa fail2ban, email MFA
@@ -135,4 +136,5 @@ hostname, primary_domain, forwarders, server_settings, np_enabled_categories, ge
 | 853/UDP | DNS-over-QUIC (RFC 9250) |
 | 80 | Block page HTTP |
 | 443 | Block page HTTPS + DoH (/dns-query) |
-| 5380 | Management panel |
+| 5380 | Management panel (HTTP) |
+| 53443 | Management panel (HTTPS) |
